@@ -1,0 +1,229 @@
+{
+  "project": "financial_table_workflow_agent",
+  "report_version": "0.1",
+  "generated_from_stages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "initial_validation_status": "failed",
+  "final_validation_status": "passed_with_warnings",
+  "rows_removed_by_repair": 2,
+  "closed_loop_result": {
+    "initial_rows": 300,
+    "initial_status": "failed",
+    "failed_check": "missing_rate_after_join",
+    "failed_reason": "close has 0.0067 missing rate (2 rows); close is a core price field required by return features and the label",
+    "rows_removed": 2,
+    "repaired_rows": 298,
+    "final_status": "passed_with_warnings",
+    "label_not_in_approved_features": true,
+    "one_line": "initial 300 rows -> Critic failed (close missing 2 rows) -> Repair removed 2 rows -> 298 rows -> re-run Critic passed_with_warnings; label label_next_5d kept out of approved features"
+  },
+  "pipeline_stages": [
+    {
+      "stage": 1,
+      "name": "Data Profiler",
+      "role": "剖析原始表：schema/dtype/缺失/日期/代码/重复/异常 + 跨表发现",
+      "status": "completed",
+      "key_outputs": [
+        "profile.json",
+        "profile_report.md"
+      ]
+    },
+    {
+      "stage": 2,
+      "name": "Workflow Planner",
+      "role": "读 profile + analysis_goal，生成有序可执行可校验的数据准备计划",
+      "status": "completed",
+      "key_outputs": [
+        "workflow_plan.json",
+        "workflow_plan_report.md"
+      ]
+    },
+    {
+      "stage": 3,
+      "name": "Code Executor",
+      "role": "按 plan 用 pandas 真正执行，产出 analysis-ready 宽表（防未来函数）",
+      "status": "completed",
+      "key_outputs": [
+        "prepared_panel.csv",
+        "data_dictionary.json",
+        "execution_log.json",
+        "execution_report.md"
+      ]
+    },
+    {
+      "stage": 4,
+      "name": "Validity Critic",
+      "role": "对 panel 做有效性审查（未来函数/label leakage/announce_date 对齐/时间切分）",
+      "status": "completed",
+      "key_outputs": [
+        "validation_report.json",
+        "validation_report.md",
+        "approved_feature_columns.json"
+      ]
+    },
+    {
+      "stage": 5,
+      "name": "Remediation / Repair Loop",
+      "role": "读 Critic failed 项，生成可解释修复方案并执行，输出 repaired panel",
+      "status": "completed",
+      "key_outputs": [
+        "repair_plan.json",
+        "repaired_panel.csv",
+        "repair_log.json",
+        "repair_report.md"
+      ]
+    },
+    {
+      "stage": 6,
+      "name": "Re-run Critic (closed-loop verification)",
+      "role": "对 repaired panel 重新运行 Critic，确认 failed 已解决",
+      "status": "completed",
+      "key_outputs": [
+        "validation_repaired/validation_report.json",
+        "validation_repaired/approved_feature_columns.json"
+      ]
+    }
+  ],
+  "profile_summary": {
+    "n_tables": 5,
+    "tables": [
+      {
+        "table": "calendar.csv",
+        "n_rows": 94,
+        "n_columns": 2
+      },
+      {
+        "table": "fundamentals.csv",
+        "n_rows": 20,
+        "n_columns": 6
+      },
+      {
+        "table": "industry.csv",
+        "n_rows": 5,
+        "n_columns": 2
+      },
+      {
+        "table": "price.csv",
+        "n_rows": 302,
+        "n_columns": 6
+      },
+      {
+        "table": "volume.csv",
+        "n_rows": 295,
+        "n_columns": 4
+      }
+    ],
+    "schema_inconsistencies": [
+      {
+        "type": "date_column_name_mismatch",
+        "tables": [
+          "price.csv",
+          "volume.csv"
+        ],
+        "columns": [
+          "trade_date",
+          "date"
+        ],
+        "note": "date fields have different names but likely same semantics"
+      },
+      {
+        "type": "security_id_column_name_mismatch",
+        "tables": [
+          "price.csv",
+          "volume.csv"
+        ],
+        "columns": [
+          "ticker",
+          "stock_code"
+        ],
+        "note": "security id fields have different names but likely same semantics"
+      },
+      {
+        "type": "fundamentals_lag",
+        "tables": [
+          "fundamentals.csv"
+        ],
+        "columns": [
+          "report_date",
+          "announce_date"
+        ],
+        "note": "financial data has announcement lag; report_date is NOT the available-as-of date"
+      }
+    ],
+    "global_potential_issues": [
+      "fundamentals.csv has both report_date and announce_date; use announce_date (not report_date) as the available-as-of date to avoid look-ahead bias",
+      "calendar.csv can be used as the trading-day alignment reference (is_trading_day flag)",
+      "price.csv and volume.csv may have non-overlapping (date, ticker) keys; verify coverage before joining"
+    ]
+  },
+  "plan_summary": {
+    "analysis_goal": "构建一个用于 5 日收益率预测或因子分析的股票/ETF 日频建模宽表。要求每一行是 ticker-date，特征只能使用当前日期及之前可获得的信息，生成 return_1d、return_5d、volatility_20d、turnover_20d、pe、pb、roe、industry 等字段，标签为未来 5 日收益率 label_next_5d，并检查是否存在未来函数或数据泄漏。",
+    "n_workflow_steps": 13,
+    "n_validation_checks": 12,
+    "n_features": 8,
+    "label": {
+      "name": "label_next_5d",
+      "definition": "未来 5 日收益率 = close.shift(-5)/close - 1，按 ticker 分组",
+      "usage": "label only; must be excluded from feature columns"
+    }
+  },
+  "execution_summary": {
+    "n_rows": 300,
+    "n_columns": 22,
+    "n_tickers": 5,
+    "date_min": "2024-01-02",
+    "date_max": "2024-03-25",
+    "primary_key_unique": true,
+    "n_steps_executed": 11,
+    "n_warnings": 3,
+    "n_errors": 0
+  },
+  "panel_summary": {
+    "prepared_panel_rows": 300,
+    "prepared_panel_cols": 22,
+    "repaired_panel_rows": 298,
+    "repaired_panel_cols": 22,
+    "close_missing_prepared": 2,
+    "close_missing_repaired": 0
+  },
+  "approved_feature_columns": [
+    "return_1d",
+    "return_5d",
+    "volatility_20d",
+    "turnover_20d",
+    "pe",
+    "pb",
+    "roe",
+    "industry_name"
+  ],
+  "excluded_columns": [
+    "date",
+    "ticker",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "turnover",
+    "label_next_5d",
+    "source_price_available",
+    "source_volume_available",
+    "source_fundamental_available",
+    "source_industry_available",
+    "announce_date"
+  ],
+  "label_column": "label_next_5d",
+  "label_not_in_approved_features": true,
+  "limitations": [
+    "Report Generator is a deterministic baseline; no LLM is called.",
+    "It only reads prior-stage artifacts; it does not re-run any stage.",
+    "No model is trained; no investment advice is produced.",
+    "Only simulated sample data is used, not real broker data."
+  ]
+}

@@ -1,0 +1,140 @@
+{
+  "project": "financial_table_workflow_agent",
+  "report_version": "0.1",
+  "n_artifacts": 22,
+  "n_exists": 18,
+  "artifacts": [
+    {
+      "stage": "stage1_profiler",
+      "path": "outputs/profiles/profile.json",
+      "description": "机器可读数据画像",
+      "exists": true
+    },
+    {
+      "stage": "stage1_profiler",
+      "path": "outputs/profiles/profile_report.md",
+      "description": "人类可读画像报告",
+      "exists": true
+    },
+    {
+      "stage": "stage2_planner",
+      "path": "outputs/plans/workflow_plan.json",
+      "description": "机器可读数据准备计划",
+      "exists": true
+    },
+    {
+      "stage": "stage2_planner",
+      "path": "outputs/plans/workflow_plan_report.md",
+      "description": "人类可读计划报告",
+      "exists": true
+    },
+    {
+      "stage": "stage3_executor",
+      "path": "outputs/prepared/prepared_panel.csv",
+      "description": "analysis-ready 宽表（初始）",
+      "exists": true
+    },
+    {
+      "stage": "stage3_executor",
+      "path": "outputs/prepared/data_dictionary.json",
+      "description": "字段口径说明",
+      "exists": true
+    },
+    {
+      "stage": "stage3_executor",
+      "path": "outputs/prepared/execution_log.json",
+      "description": "执行日志",
+      "exists": true
+    },
+    {
+      "stage": "stage3_executor",
+      "path": "outputs/prepared/execution_report.md",
+      "description": "执行报告",
+      "exists": true
+    },
+    {
+      "stage": "stage4_critic",
+      "path": "outputs/validation/validation_report.json",
+      "description": "初始有效性审查报告",
+      "exists": true
+    },
+    {
+      "stage": "stage4_critic",
+      "path": "outputs/validation/validation_report.md",
+      "description": "初始审查报告（人类可读）",
+      "exists": true
+    },
+    {
+      "stage": "stage4_critic",
+      "path": "outputs/validation/approved_feature_columns.json",
+      "description": "初始 approved features",
+      "exists": true
+    },
+    {
+      "stage": "stage5_repair",
+      "path": "outputs/repaired/repair_plan.json",
+      "description": "修复方案",
+      "exists": true
+    },
+    {
+      "stage": "stage5_repair",
+      "path": "outputs/repaired/repaired_panel.csv",
+      "description": "修复后 panel",
+      "exists": true
+    },
+    {
+      "stage": "stage5_repair",
+      "path": "outputs/repaired/repair_log.json",
+      "description": "修复日志",
+      "exists": true
+    },
+    {
+      "stage": "stage5_repair",
+      "path": "outputs/repaired/repair_report.md",
+      "description": "修复报告",
+      "exists": true
+    },
+    {
+      "stage": "stage6_rerun_critic",
+      "path": "outputs/validation_repaired/validation_report.json",
+      "description": "复审报告",
+      "exists": true
+    },
+    {
+      "stage": "stage6_rerun_critic",
+      "path": "outputs/validation_repaired/validation_report.md",
+      "description": "复审报告（人类可读）",
+      "exists": true
+    },
+    {
+      "stage": "stage6_rerun_critic",
+      "path": "outputs/validation_repaired/approved_feature_columns.json",
+      "description": "复审 approved features",
+      "exists": true
+    },
+    {
+      "stage": "stage6_report",
+      "path": "outputs/final_report/final_workflow_summary.json",
+      "description": "六阶段汇总 JSON",
+      "exists": false
+    },
+    {
+      "stage": "stage6_report",
+      "path": "outputs/final_report/final_workflow_report.md",
+      "description": "最终总报告",
+      "exists": false
+    },
+    {
+      "stage": "stage6_report",
+      "path": "outputs/final_report/final_workflow_one_page.md",
+      "description": "一页摘要",
+      "exists": false
+    },
+    {
+      "stage": "stage6_report",
+      "path": "outputs/final_report/pipeline_artifacts_index.json",
+      "description": "产物索引",
+      "exists": false
+    }
+  ]
+}

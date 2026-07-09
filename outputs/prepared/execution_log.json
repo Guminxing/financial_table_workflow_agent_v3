@@ -1,0 +1,244 @@
+{
+  "project": "financial_table_workflow_agent",
+  "executor_version": "0.1",
+  "input_plan_path": "data/sample",
+  "input_dir": "data/sample",
+  "steps_executed": [
+    {
+      "step": "load_raw_tables",
+      "status": "ok",
+      "tables": {
+        "price.csv": [
+          "trade_date",
+          "ticker",
+          "open",
+          "high",
+          "low",
+          "close"
+        ],
+        "volume.csv": [
+          "date",
+          "stock_code",
+          "volume",
+          "turnover"
+        ],
+        "fundamentals.csv": [
+          "report_date",
+          "announce_date",
+          "ticker",
+          "pe",
+          "pb",
+          "roe"
+        ],
+        "industry.csv": [
+          "ticker",
+          "industry_name"
+        ],
+        "calendar.csv": [
+          "date",
+          "is_trading_day"
+        ]
+      }
+    },
+    {
+      "step": "standardize_column_names",
+      "status": "ok",
+      "rename_map": {
+        "trade_date": "date",
+        "stock_code": "ticker"
+      }
+    },
+    {
+      "step": "parse_and_validate_dates",
+      "status": "ok",
+      "date_columns_parsed": {
+        "price.csv": [
+          "date"
+        ],
+        "volume.csv": [
+          "date"
+        ],
+        "fundamentals.csv": [
+          "report_date",
+          "announce_date"
+        ],
+        "calendar.csv": [
+          "date"
+        ]
+      }
+    },
+    {
+      "step": "validate_primary_keys",
+      "status": "ok"
+    },
+    {
+      "step": "align_with_trading_calendar",
+      "status": "ok",
+      "n_trading_days": 60
+    },
+    {
+      "step": "merge_price_and_volume",
+      "status": "ok",
+      "n_rows": 300,
+      "n_missing_volume": 5
+    },
+    {
+      "step": "compute_price_volume_features",
+      "status": "ok",
+      "features": [
+        "return_1d",
+        "return_5d",
+        "volatility_20d",
+        "turnover_20d"
+      ],
+      "leakage_safe": true,
+      "note": "all rolling/pct_change grouped by ticker, historical window only"
+    },
+    {
+      "step": "align_fundamentals_by_announce_date",
+      "status": "ok",
+      "method": "merge_asof direction=backward on announce_date, grouped by ticker",
+      "look_ahead_bias_avoided": true,
+      "n_rows_with_fundamental": 53
+    },
+    {
+      "step": "merge_industry",
+      "status": "ok",
+      "n_missing_industry": 60
+    },
+    {
+      "step": "create_future_return_label",
+      "status": "ok",
+      "label": "label_next_5d",
+      "role": "label_only",
+      "must_exclude_from_features": true
+    },
+    {
+      "step": "final_missing_and_quality_checks",
+      "status": "ok",
+      "n_rows": 300,
+      "n_columns": 22,
+      "primary_key_unique": true
+    }
+  ],
+  "warnings": [
+    "price.csv: 2 duplicate (date, ticker) rows; strategy=keep_last (needs manual confirmation)",
+    "merge_price_and_volume: 5 panel row(s) have no volume data (left join)",
+    "merge_industry: 60 panel row(s) have missing/abnormal industry_name"
+  ],
+  "errors": [],
+  "output_files": [
+    "outputs/prepared/prepared_panel.csv",
+    "outputs/prepared/data_dictionary.json",
+    "outputs/prepared/execution_log.json"
+  ],
+  "final_table_summary": {
+    "n_rows": 300,
+    "n_columns": 22,
+    "n_tickers": 5,
+    "date_min": "2024-01-02",
+    "date_max": "2024-03-25",
+    "primary_key_unique": true
+  },
+  "column_missing_summary": {
+    "date": 0.0,
+    "ticker": 0.0,
+    "open": 0.01,
+    "high": 0.0033,
+    "low": 0.0033,
+    "close": 0.0067,
+    "volume": 0.03,
+    "turnover": 0.0333,
+    "return_1d": 0.03,
+    "return_5d": 0.0967,
+    "volatility_20d": 0.0333,
+    "turnover_20d": 0.0,
+    "pe": 0.8233,
+    "pb": 0.8233,
+    "roe": 0.8233,
+    "industry_name": 0.2,
+    "label_next_5d": 0.0967,
+    "source_price_available": 0.0,
+    "source_volume_available": 0.0,
+    "source_fundamental_available": 0.0,
+    "source_industry_available": 0.0,
+    "announce_date": 0.8233
+  },
+  "quality_checks": [
+    {
+      "check": "duplicate_row_handling",
+      "table": "price.csv",
+      "duplicate_count": 2,
+      "strategy": "keep_last",
+      "needs_manual_confirmation": true
+    },
+    {
+      "check": "fundamentals_aligned_by_announce_date",
+      "status": "implemented",
+      "method": "merge_asof backward on announce_date per ticker",
+      "report_date_not_used": true
+    },
+    {
+      "check": "primary_key_uniqueness",
+      "value": true,
+      "duplicate_count": 0,
+      "severity": "info"
+    },
+    {
+      "check": "missing_rate_after_join",
+      "column_missing_summary": {
+        "date": 0.0,
+        "ticker": 0.0,
+        "open": 0.01,
+        "high": 0.0033,
+        "low": 0.0033,
+        "close": 0.0067,
+        "volume": 0.03,
+        "turnover": 0.0333,
+        "source_price_available": 0.0,
+        "source_volume_available": 0.0,
+        "return_1d": 0.03,
+        "return_5d": 0.0967,
+        "volatility_20d": 0.0333,
+        "turnover_20d": 0.0,
+        "announce_date": 0.8233,
+        "pe": 0.8233,
+        "pb": 0.8233,
+        "roe": 0.8233,
+        "source_fundamental_available": 0.0,
+        "industry_name": 0.2,
+        "source_industry_available": 0.0,
+        "label_next_5d": 0.0967
+      },
+      "severity": "info"
+    },
+    {
+      "check": "negative_or_zero_price_check",
+      "count": 0,
+      "severity": "info"
+    },
+    {
+      "check": "negative_volume_or_turnover_check",
+      "negative_volume": 0,
+      "negative_turnover": 0,
+      "severity": "info"
+    },
+    {
+      "check": "label_next_5d_missing_rate",
+      "value": 0.0967,
+      "severity": "info"
+    },
+    {
+      "check": "pe_pb_roe_missing_rates",
+      "pe": 0.8233,
+      "pb": 0.8233,
+      "roe": 0.8233,
+      "severity": "info"
+    },
+    {
+      "check": "industry_name_missing_rate",
+      "value": 0.2,
+      "severity": "warning"
+    }
+  ]
+}

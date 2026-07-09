@@ -1,0 +1,90 @@
+{
+  "date": {
+    "role": "primary_key",
+    "description": "Trading date (trading-day aligned)"
+  },
+  "ticker": {
+    "role": "primary_key",
+    "description": "Security identifier"
+  },
+  "open": {
+    "role": "raw_input",
+    "description": "Daily open price"
+  },
+  "high": {
+    "role": "raw_input",
+    "description": "Daily high price"
+  },
+  "low": {
+    "role": "raw_input",
+    "description": "Daily low price"
+  },
+  "close": {
+    "role": "raw_input",
+    "description": "Daily close price"
+  },
+  "volume": {
+    "role": "raw_input",
+    "description": "Daily trading volume"
+  },
+  "turnover": {
+    "role": "raw_input",
+    "description": "Daily turnover (notional)"
+  },
+  "return_1d": {
+    "role": "feature",
+    "description": "One-day historical return from close price (pct_change(1), grouped by ticker)"
+  },
+  "return_5d": {
+    "role": "feature",
+    "description": "Five-day historical return from close price (pct_change(5), grouped by ticker)"
+  },
+  "volatility_20d": {
+    "role": "feature",
+    "description": "Historical 20-day rolling std of return_1d (past window only, grouped by ticker)"
+  },
+  "turnover_20d": {
+    "role": "feature",
+    "description": "Historical 20-day rolling mean of turnover (past window only, grouped by ticker)"
+  },
+  "pe": {
+    "role": "feature",
+    "description": "P/E ratio, as-of aligned by announce_date (NOT report_date) to avoid look-ahead bias"
+  },
+  "pb": {
+    "role": "feature",
+    "description": "P/B ratio, as-of aligned by announce_date (NOT report_date) to avoid look-ahead bias"
+  },
+  "roe": {
+    "role": "feature",
+    "description": "ROE, as-of aligned by announce_date (NOT report_date) to avoid look-ahead bias"
+  },
+  "industry_name": {
+    "role": "feature",
+    "description": "Industry classification (static, joined by ticker)"
+  },
+  "label_next_5d": {
+    "role": "label",
+    "description": "Future 5-day return = close.shift(-5)/close-1; MUST be excluded from feature columns"
+  },
+  "source_price_available": {
+    "role": "source_flag",
+    "description": "Whether price source exists for the row"
+  },
+  "source_volume_available": {
+    "role": "source_flag",
+    "description": "Whether volume/turnover is non-null"
+  },
+  "source_fundamental_available": {
+    "role": "source_flag",
+    "description": "Whether pe/pb/roe at least one is non-null"
+  },
+  "source_industry_available": {
+    "role": "source_flag",
+    "description": "Whether industry_name is non-null"
+  },
+  "announce_date": {
+    "role": "auxiliary",
+    "description": "Announce date of the as-of matched fundamental record (for audit)"
+  }
+}

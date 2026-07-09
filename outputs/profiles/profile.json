@@ -1,0 +1,478 @@
+{
+  "project": "financial_table_workflow_agent",
+  "profile_version": "0.1",
+  "tables": [
+    {
+      "table_name": "calendar.csv",
+      "file_path": "data/sample/calendar.csv",
+      "n_rows": 94,
+      "n_columns": 2,
+      "columns": [
+        "date",
+        "is_trading_day"
+      ],
+      "dtypes": {
+        "date": "object",
+        "is_trading_day": "object"
+      },
+      "missing_summary": {
+        "date": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        },
+        "is_trading_day": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        }
+      },
+      "date_columns": [
+        "date"
+      ],
+      "id_columns": [],
+      "numeric_columns": [
+        "is_trading_day"
+      ],
+      "date_range": {
+        "date": {
+          "min": "2024-01-02",
+          "max": "2024-04-04"
+        }
+      },
+      "duplicate_rows_count": 0,
+      "duplicate_key_candidates": [],
+      "numeric_stats": {
+        "is_trading_day": {
+          "min": 0.0,
+          "max": 1.0,
+          "mean": 0.6383,
+          "std": 0.4831
+        }
+      },
+      "potential_issues": []
+    },
+    {
+      "table_name": "fundamentals.csv",
+      "file_path": "data/sample/fundamentals.csv",
+      "n_rows": 20,
+      "n_columns": 6,
+      "columns": [
+        "report_date",
+        "announce_date",
+        "ticker",
+        "pe",
+        "pb",
+        "roe"
+      ],
+      "dtypes": {
+        "report_date": "object",
+        "announce_date": "object",
+        "ticker": "object",
+        "pe": "object",
+        "pb": "object",
+        "roe": "object"
+      },
+      "missing_summary": {
+        "report_date": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        },
+        "announce_date": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        },
+        "ticker": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        },
+        "pe": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        },
+        "pb": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        },
+        "roe": {
+          "missing_count": 1,
+          "missing_rate": 0.05
+        }
+      },
+      "date_columns": [
+        "report_date",
+        "announce_date"
+      ],
+      "id_columns": [
+        "ticker"
+      ],
+      "numeric_columns": [
+        "pe",
+        "pb",
+        "roe"
+      ],
+      "date_range": {
+        "report_date": {
+          "min": "2023-12-31",
+          "max": "2024-09-30"
+        },
+        "announce_date": {
+          "min": "2024-02-19",
+          "max": "2024-12-08"
+        }
+      },
+      "duplicate_rows_count": 0,
+      "duplicate_key_candidates": [
+        {
+          "key": [
+            "report_date",
+            "ticker"
+          ],
+          "duplicate_count": 0
+        }
+      ],
+      "numeric_stats": {
+        "pe": {
+          "min": -12.5,
+          "max": 50.47,
+          "mean": 32.0855,
+          "std": 15.4048
+        },
+        "pb": {
+          "min": 0.5,
+          "max": 7.91,
+          "mean": 3.9605,
+          "std": 2.3
+        },
+        "roe": {
+          "min": -4.42,
+          "max": 28.99,
+          "mean": 15.4837,
+          "std": 10.4642
+        }
+      },
+      "potential_issues": [
+        "warning: column 'pe' has negative value (min=-12.5); possible loss-making company, verify if intended"
+      ]
+    },
+    {
+      "table_name": "industry.csv",
+      "file_path": "data/sample/industry.csv",
+      "n_rows": 5,
+      "n_columns": 2,
+      "columns": [
+        "ticker",
+        "industry_name"
+      ],
+      "dtypes": {
+        "ticker": "object",
+        "industry_name": "object"
+      },
+      "missing_summary": {
+        "ticker": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        },
+        "industry_name": {
+          "missing_count": 1,
+          "missing_rate": 0.2
+        }
+      },
+      "date_columns": [],
+      "id_columns": [
+        "ticker",
+        "industry_name"
+      ],
+      "numeric_columns": [],
+      "date_range": {},
+      "duplicate_rows_count": 0,
+      "duplicate_key_candidates": [],
+      "numeric_stats": {},
+      "potential_issues": []
+    },
+    {
+      "table_name": "price.csv",
+      "file_path": "data/sample/price.csv",
+      "n_rows": 302,
+      "n_columns": 6,
+      "columns": [
+        "trade_date",
+        "ticker",
+        "open",
+        "high",
+        "low",
+        "close"
+      ],
+      "dtypes": {
+        "trade_date": "object",
+        "ticker": "object",
+        "open": "object",
+        "high": "object",
+        "low": "object",
+        "close": "object"
+      },
+      "missing_summary": {
+        "trade_date": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        },
+        "ticker": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        },
+        "open": {
+          "missing_count": 3,
+          "missing_rate": 0.0099
+        },
+        "high": {
+          "missing_count": 1,
+          "missing_rate": 0.0033
+        },
+        "low": {
+          "missing_count": 1,
+          "missing_rate": 0.0033
+        },
+        "close": {
+          "missing_count": 2,
+          "missing_rate": 0.0066
+        }
+      },
+      "date_columns": [
+        "trade_date"
+      ],
+      "id_columns": [
+        "ticker"
+      ],
+      "numeric_columns": [
+        "open",
+        "high",
+        "low",
+        "close"
+      ],
+      "date_range": {
+        "trade_date": {
+          "min": "2024-01-02",
+          "max": "2024-03-25"
+        }
+      },
+      "duplicate_rows_count": 2,
+      "duplicate_key_candidates": [
+        {
+          "key": [
+            "trade_date",
+            "ticker"
+          ],
+          "duplicate_count": 2
+        }
+      ],
+      "numeric_stats": {
+        "open": {
+          "min": 33.5434,
+          "max": 130.4758,
+          "mean": 66.5996,
+          "std": 32.68
+        },
+        "high": {
+          "min": 35.0681,
+          "max": 130.9888,
+          "mean": 67.9981,
+          "std": 33.3621
+        },
+        "low": {
+          "min": 32.6754,
+          "max": 125.8429,
+          "mean": 65.0585,
+          "std": 31.9891
+        },
+        "close": {
+          "min": 34.1103,
+          "max": 129.2403,
+          "mean": 66.7021,
+          "std": 32.7564
+        }
+      },
+      "potential_issues": [
+        "warning: 2 fully duplicated rows found",
+        "warning: duplicate key on ['trade_date', 'ticker']: 2 duplicates"
+      ]
+    },
+    {
+      "table_name": "volume.csv",
+      "file_path": "data/sample/volume.csv",
+      "n_rows": 295,
+      "n_columns": 4,
+      "columns": [
+        "date",
+        "stock_code",
+        "volume",
+        "turnover"
+      ],
+      "dtypes": {
+        "date": "object",
+        "stock_code": "object",
+        "volume": "object",
+        "turnover": "object"
+      },
+      "missing_summary": {
+        "date": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        },
+        "stock_code": {
+          "missing_count": 0,
+          "missing_rate": 0.0
+        },
+        "volume": {
+          "missing_count": 4,
+          "missing_rate": 0.0136
+        },
+        "turnover": {
+          "missing_count": 5,
+          "missing_rate": 0.0169
+        }
+      },
+      "date_columns": [
+        "date"
+      ],
+      "id_columns": [
+        "stock_code"
+      ],
+      "numeric_columns": [
+        "volume",
+        "turnover"
+      ],
+      "date_range": {
+        "date": {
+          "min": "2024-01-02",
+          "max": "2024-03-25"
+        }
+      },
+      "duplicate_rows_count": 0,
+      "duplicate_key_candidates": [
+        {
+          "key": [
+            "date",
+            "stock_code"
+          ],
+          "duplicate_count": 0
+        }
+      ],
+      "numeric_stats": {
+        "volume": {
+          "min": 126802.0,
+          "max": 9976907.0,
+          "mean": 5047728.3986,
+          "std": 2764005.19
+        },
+        "turnover": {
+          "min": 6532267.27,
+          "max": 1301782010.94,
+          "mean": 409489577.1455,
+          "std": 314084339.9958
+        }
+      },
+      "potential_issues": []
+    }
+  ],
+  "cross_table_findings": {
+    "possible_date_columns": [
+      {
+        "table": "calendar.csv",
+        "column": "date"
+      },
+      {
+        "table": "fundamentals.csv",
+        "column": "report_date"
+      },
+      {
+        "table": "fundamentals.csv",
+        "column": "announce_date"
+      },
+      {
+        "table": "price.csv",
+        "column": "trade_date"
+      },
+      {
+        "table": "volume.csv",
+        "column": "date"
+      }
+    ],
+    "possible_security_id_columns": [
+      {
+        "table": "fundamentals.csv",
+        "column": "ticker"
+      },
+      {
+        "table": "industry.csv",
+        "column": "ticker"
+      },
+      {
+        "table": "industry.csv",
+        "column": "industry_name"
+      },
+      {
+        "table": "price.csv",
+        "column": "ticker"
+      },
+      {
+        "table": "volume.csv",
+        "column": "stock_code"
+      }
+    ],
+    "schema_inconsistencies": [
+      {
+        "type": "date_column_name_mismatch",
+        "tables": [
+          "price.csv",
+          "volume.csv"
+        ],
+        "columns": [
+          "trade_date",
+          "date"
+        ],
+        "note": "date fields have different names but likely same semantics"
+      },
+      {
+        "type": "security_id_column_name_mismatch",
+        "tables": [
+          "price.csv",
+          "volume.csv"
+        ],
+        "columns": [
+          "ticker",
+          "stock_code"
+        ],
+        "note": "security id fields have different names but likely same semantics"
+      },
+      {
+        "type": "fundamentals_lag",
+        "tables": [
+          "fundamentals.csv"
+        ],
+        "columns": [
+          "report_date",
+          "announce_date"
+        ],
+        "note": "financial data has announcement lag; report_date is NOT the available-as-of date"
+      }
+    ],
+    "join_key_suggestions": [
+      {
+        "left_table": "price.csv",
+        "right_table": "volume.csv",
+        "left_keys": [
+          "trade_date",
+          "ticker"
+        ],
+        "right_keys": [
+          "date",
+          "stock_code"
+        ],
+        "reason": "date/security id fields have different names but likely represent the same keys"
+      }
+    ],
+    "global_potential_issues": [
+      "fundamentals.csv has both report_date and announce_date; use announce_date (not report_date) as the available-as-of date to avoid look-ahead bias",
+      "calendar.csv can be used as the trading-day alignment reference (is_trading_day flag)",
+      "price.csv and volume.csv may have non-overlapping (date, ticker) keys; verify coverage before joining"
+    ]
+  }
+}
