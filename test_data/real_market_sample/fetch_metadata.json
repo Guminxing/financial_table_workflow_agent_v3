@@ -1,0 +1,46 @@
+{
+  "project": "financial_table_workflow_agent",
+  "adapter_version": "0.1",
+  "generated_at": "2026-07-14 15:15:59",
+  "fetch_date": "2026-07-14",
+  "tradingagents_path": "D:/dwzq/TradingAgents-astock-main",
+  "cache_dir": "D:/dwzq/financial_table_workflow_agent_v3/outputs/cache",
+  "requested_tickers": [
+    "600519"
+  ],
+  "resolved_tickers": [
+    "600519"
+  ],
+  "start_date": "2024-01-01",
+  "end_date": "2024-01-10",
+  "ohlcv_source_by_ticker": {
+    "600519": "internal_fallback"
+  },
+  "rows_by_ticker": {
+    "600519": 7
+  },
+  "per_ticker_errors": {},
+  "per_ticker_warnings": {},
+  "summary_rows": {
+    "price": 7,
+    "volume": 7,
+    "fundamentals": 0,
+    "industry": 1,
+    "calendar": 10
+  },
+  "output_files": {
+    "price": "D:/dwzq/financial_table_workflow_agent_v3/test_data/real_market_sample/price.csv",
+    "volume": "D:/dwzq/financial_table_workflow_agent_v3/test_data/real_market_sample/volume.csv",
+    "fundamentals": "D:/dwzq/financial_table_workflow_agent_v3/test_data/real_market_sample/fundamentals.csv",
+    "industry": "D:/dwzq/financial_table_workflow_agent_v3/test_data/real_market_sample/industry.csv",
+    "calendar": "D:/dwzq/financial_table_workflow_agent_v3/test_data/real_market_sample/calendar.csv"
+  },
+  "fundamentals_limitation": "fundamentals.csv contains CURRENT SNAPSHOT pe/pb/roe with announce_date = fetch date, NOT historical point-in-time fundamentals. The reference project's PE/PB/ROE are snapshots, not a complete historical fundamentals database. Do NOT backfill these snapshots into historical dates; that would fabricate announce_date and introduce look-ahead bias. When snapshot_fundamentals=False or the quote source is unavailable, fundamentals.csv is header-only and the pipeline continues with a warning (not a failure).",
+  "warnings": [
+    "snapshot_fundamentals=False: fundamentals.csv is header-only by request (--no_snapshot_fundamentals)."
+  ],
+  "errors": [],
+  "fetch_command": "python -B src/run_fetch_real_data.py --tickers 600519 --start_date 2024-01-01 --end_date 2024-01-10 --output_dir test_data/real_market_sample --tradingagents_path D:\\dwzq\\TradingAgents-astock-main --no_snapshot_fundamentals",
+  "snapshot_fundamentals_enabled": false,
+  "fixture_purpose": "Small reproducible real A-share fixture for automated tests and minimal demo; NOT a representative market sample; NOT investment data."
+}

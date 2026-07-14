@@ -47,10 +47,10 @@ class FinancialTableProfiler:
 
     用法::
 
-        profiler = FinancialTableProfiler(input_dir="data/sample")
+        profiler = FinancialTableProfiler(input_dir="data/real_market")
         profile = profiler.run()
-        profiler.save_json(profile, "outputs/profiles/profile.json")
-        profiler.save_markdown(profile, "outputs/profiles/profile_report.md")
+        profiler.save_json(profile, "outputs_real/profiles/profile.json")
+        profiler.save_markdown(profile, "outputs_real/profiles/profile_report.md")
     """
 
     def __init__(self, input_dir: str | Path) -> None:
@@ -64,7 +64,8 @@ class FinancialTableProfiler:
         if not csv_files:
             raise FileNotFoundError(
                 f"No CSV files found in {self.input_dir}. "
-                "Run generate_sample_data.py first."
+                "Download real market data first (see src/run_fetch_real_data.py); "
+                "synthetic sample data generation has been removed in v3."
             )
 
         tables: list[dict[str, Any]] = []

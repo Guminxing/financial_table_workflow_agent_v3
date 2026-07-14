@@ -3,11 +3,11 @@
 用法::
 
     python src/run_repair.py \
-      --panel_path outputs/prepared/prepared_panel.csv \
-      --validation_report_path outputs/validation/validation_report.json \
-      --data_dictionary_path outputs/prepared/data_dictionary.json \
-      --approved_features_path outputs/validation/approved_feature_columns.json \
-      --output_dir outputs/repaired
+      --panel_path outputs_real/prepared/prepared_panel.csv \
+      --validation_report_path outputs_real/validation/validation_report.json \
+      --data_dictionary_path outputs_real/prepared/data_dictionary.json \
+      --approved_features_path outputs_real/validation/approved_feature_columns.json \
+      --output_dir outputs_real/repaired
 
 行为：
 1. 读取 prepared_panel.csv 与 validation_report.json 等。
@@ -34,27 +34,27 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run the Remediation / Repair Loop.")
     p.add_argument(
         "--panel_path",
-        default="outputs/prepared/prepared_panel.csv",
+        default="outputs_real/prepared/prepared_panel.csv",
         help="Path to prepared_panel.csv",
     )
     p.add_argument(
         "--validation_report_path",
-        default="outputs/validation/validation_report.json",
+        default="outputs_real/validation/validation_report.json",
         help="Path to validation_report.json from the Critic",
     )
     p.add_argument(
         "--data_dictionary_path",
-        default="outputs/prepared/data_dictionary.json",
+        default="outputs_real/prepared/data_dictionary.json",
         help="Path to data_dictionary.json",
     )
     p.add_argument(
         "--approved_features_path",
-        default="outputs/validation/approved_feature_columns.json",
+        default="outputs_real/validation/approved_feature_columns.json",
         help="Path to approved_feature_columns.json",
     )
     p.add_argument(
         "--output_dir",
-        default="outputs/repaired",
+        default="outputs_real/repaired",
         help="Directory to write repaired outputs",
     )
     return p.parse_args()

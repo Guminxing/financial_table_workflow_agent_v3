@@ -2,7 +2,7 @@
 
 ## 1. 为什么需要 Stage 8
 
-前七阶段（Profiler → Planner → Executor → Critic → Repair → Re-run Critic → Final Report → One-Click Runner + Agent Shell）已形成完整闭环，但只跑模拟数据（`data/sample`）。导师反馈要求接入真实市场数据。本阶段把参考项目 `TradingAgents-astock-main` 的真实 A 股行情获取能力接入当前项目，输出本项目约定的五张 CSV，并确保现有流水线能完整处理真实数据。
+前七阶段（Profiler → Planner → Executor → Critic → Repair → Re-run Critic → Final Report → One-Click Runner + Agent Shell）已形成完整闭环。v3 起项目**只使用真实市场数据**作为正式输入，合成样例数据及其自动生成逻辑已彻底移除。本阶段把参考项目 `TradingAgents-astock-main` 的真实 A 股行情获取能力接入当前项目，输出本项目约定的五张 CSV，并确保现有流水线能完整处理真实数据。
 
 **重要边界**：本阶段只新增数据接入适配器与配套 CLI，**不修改前六阶段核心数据处理逻辑**（仅做必要的空基本面兼容与无需 Repair 时的 no-op 产物修复），**不修改参考项目**（参考项目是只读依赖）。
 
@@ -23,15 +23,15 @@ TradingAgents-astock-main (只读依赖)
 src/real_data_adapter.py  (RealDataFetchConfig + fetch_real_data)
             │  复用参考项目函数，不复制逻辑
             ▼
-data/raw_real/*.csv  (price / volume / fundamentals / industry / calendar)
+data/real_market/*.csv  (price / volume / fundamentals / industry / calendar)
   + fetch_metadata.json
             │
             ▼
-python src/run_all.py --input_dir data/raw_real
+python src/run_all.py --input_dir data/real_market --output_root outputs_real
   (或 src/run_fetch_real_data.py --run_pipeline 一条命令完成抓取+流水线)
 ```
 
-缓存与日志写到当前项目的 `outputs/cache` 下（通过 `TRADINGAGENTS_CACHE_DIR` 环境变量指向当前项目目录），**不写入参考项目目录**。
+缓存与日志写到当前项目的 `outputs/cache` 下（通过 `TRADINGAGENTS_CACHE_DIR` 环境变量指向当前项目目录），**不写入参考项目目录**。`data/real_market/` 与 `outputs_real/` 均不提交 Git。
 
 ---
 
@@ -42,7 +42,7 @@ python src/run_all.py --input_dir data/raw_real
 ```bash
 python src/run_fetch_real_data.py --tickers 600519,000001,300750 \
     --start_date 2024-01-01 --end_date 2024-06-30 \
-    --output_dir data/raw_real \
+    --output_dir data/real_market \
     --tradingagents_path D:\dwzq\TradingAgents-astock-main
 ```
 
@@ -51,7 +51,7 @@ python src/run_fetch_real_data.py --tickers 600519,000001,300750 \
 ```bash
 python src/run_fetch_real_data.py --tickers 600519,000001 \
     --start_date 2024-01-01 --end_date 2024-06-30 \
-    --output_dir data/raw_real \
+    --output_dir data/real_market \
     --tradingagents_path D:\dwzq\TradingAgents-astock-main \
     --run_pipeline --output_root outputs_real
 ```
@@ -61,7 +61,7 @@ python src/run_fetch_real_data.py --tickers 600519,000001 \
 ```bash
 python src/run_fetch_real_data.py --tickers 600519 \
     --start_date 2024-01-01 --end_date 2024-01-10 \
-    --output_dir data/raw_real_verify \
+    --output_dir test_data/real_market_sample \
     --tradingagents_path D:\dwzq\TradingAgents-astock-main \
     --no_snapshot_fundamentals
 ```
@@ -69,7 +69,7 @@ python src/run_fetch_real_data.py --tickers 600519 \
 ### 3.4 用抓取到的真实数据单独跑流水线
 
 ```bash
-python src/run_all.py --input_dir data/raw_real --output_root outputs_real
+python src/run_all.py --input_dir data/real_market --output_root outputs_real
 ```
 
 ---
@@ -126,7 +126,7 @@ OHLCV 严格按 `start_date ~ end_date` 过滤；按 (date, ticker) 去重（kee
 - `push2.eastmoney.com`（东财行业字段）
 - mootdx TCP 7709（若安装 mootdx；未安装时自动走 Sina HTTP fallback）
 
-若运行环境无法联网，必须明确标记"网络限制"，**不得生成模拟数据冒充测试成功**。流水线处理本身离线可运行（只读已抓取的 CSV）。
+若运行环境无法联网，必须明确标记"网络限制"，**不得生成合成数据冒充测试成功**。流水线处理本身离线可运行（只读已抓取的 CSV）。
 
 ---
 
@@ -157,11 +157,11 @@ OHLCV 严格按 `start_date ~ end_date` 过滤；按 (date, ticker) 去重（kee
 
 ## 10. 与 Stage 1-7 的关系
 
-- **数据入口复用**：真实数据抓取后输出到 `data/raw_real`，通过 `run_all.py --input_dir data/raw_real` 或 `run_fetch_real_data.py --run_pipeline` 复用现有六阶段 workflow，**不改 Stage 1-6 核心数据处理逻辑**。
+- **数据入口复用**：真实数据抓取后输出到 `data/real_market`，通过 `run_all.py --input_dir data/real_market` 或 `run_fetch_real_data.py --run_pipeline` 复用现有六阶段 workflow，**不改 Stage 1-6 核心数据处理逻辑**。
 - **空基本面兼容**（`executor.py`）：某 ticker 无基本面时补 `announce_date(NaT)` + pe/pb/roe(NA) 列，保证 panel 始终含 announce_date 列。
 - **Critic 防御**（`critic.py`）：announce_date 列缺失时区分两种情况——无基本面值则 warning（正常），有基本面值却无 announce_date 则 failed（防时间泄漏）。
-- **无需 Repair 时的 no-op 产物**（`pipeline_runner.py` + `report_generator.py`）：initial critic 未失败时生成 no-op repair artifacts（prepared→repaired 复制、repair_plan/log/report 说明"无需修复"、initial validation 复制为 repaired validation），让 Final Report 正常生成。区分两种 no-op：`no_repair_needed`（initial 未失败）与 `repair_disabled`（initial failed + --no_repair，最终仍 failed）。Final Report 动态读取实际结果，不硬编码 300/298/2/failed。
-- `data/sample` 演示流程仍保留（`python src/run_all.py` 默认走模拟数据）。
+- **无需 Repair 时的 no-op 产物**（`pipeline_runner.py` + `report_generator.py`）：initial critic 未失败时生成 no-op repair artifacts（prepared→repaired 复制、repair_plan/log/report 说明"无需修复"、initial validation 复制为 repaired validation），让 Final Report 正常生成。区分两种 no-op：`no_repair_needed`（initial 未失败）与 `repair_disabled`（initial failed + --no_repair，最终仍 failed）。Final Report 动态读取实际结果，不硬编码行数。
+- v3 已移除合成样例数据与自动生成逻辑；正式运行只读真实市场数据。
 
 ---
 

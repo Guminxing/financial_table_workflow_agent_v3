@@ -16,7 +16,7 @@ raw financial tables → Data Profiler → profile.json → profile_report.md
 
 - 纯确定性 Python/Pandas 实现，**不调用任何 LLM API**。
 - 不依赖真实 Agent 框架，先产出结构化数据画像，为后续 Planner Agent 提供输入。
-- 可完全离线运行，使用模拟数据验证 workflow。
+- 可完全离线运行；v3 起使用真实市场数据（测试用小型真实 fixture）。
 
 ## 3. 不做真实投资建议
 
@@ -28,7 +28,7 @@ raw financial tables → Data Profiler → profile.json → profile_report.md
 
 - 不连接真实券商系统、行情接口、交易接口。
 - 不读取真实生产数据库。
-- 当前所有数据均为 `generate_sample_data.py` 生成的模拟数据，仅用于验证 workflow 逻辑。
+- v3 起正式输入为真实 A 股市场数据（经适配器抓取）；合成样例数据已移除。
 
 ## 5. 不追求预测收益率
 
@@ -37,17 +37,11 @@ raw financial tables → Data Profiler → profile.json → profile_report.md
 - 不做策略评估。
 - 产出物是"干净的宽表"，不是"预测结果"。
 
-## 6. 当前模拟数据用于验证 workflow
+## 6. 真实市场数据用于验证 workflow
 
-模拟数据故意注入以下"脏数据"特征，用于验证 profiler 的检测能力：
-
-- 缺失值（price/volume/fundamentals 均有）
-- 重复 (date, ticker) 主键（price.csv）
-- 字段口径不一致（price 用 `trade_date`/`ticker`，volume 用 `date`/`stock_code`）
-- 财务公告滞后（fundamentals 同时有 `report_date` 与 `announce_date`）
-- 行业缺失/拼写异常（industry.csv）
-- price 与 volume 覆盖不一致（部分 key 在 volume 中缺失）
-- 交易日历含非交易日（calendar.csv）
+v3 起项目只使用真实市场数据。测试用的小型真实 fixture（`test_data/real_market_sample/`，
+600519 / 2024-01-01..2024-01-10）经适配器抓取，可离线复现地验证 workflow 逻辑。
+故障场景（缺失/重复/no_progress/max_rounds）在 fixture 的临时副本上注入，不修改被提交的真实 fixture。
 
 ## 7. 后续如何迁移到临床 clinical table capstone
 

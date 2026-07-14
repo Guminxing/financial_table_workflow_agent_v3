@@ -3,18 +3,18 @@
 用法::
 
     python src/run_report_generator.py \
-      --profile_json outputs/profiles/profile.json \
-      --workflow_plan_json outputs/plans/workflow_plan.json \
-      --prepared_panel outputs/prepared/prepared_panel.csv \
-      --execution_log outputs/prepared/execution_log.json \
-      --initial_validation_report outputs/validation/validation_report.json \
-      --repair_plan outputs/repaired/repair_plan.json \
-      --repair_log outputs/repaired/repair_log.json \
-      --repaired_panel outputs/repaired/repaired_panel.csv \
-      --final_validation_report outputs/validation_repaired/validation_report.json \
-      --approved_features outputs/validation_repaired/approved_feature_columns.json \
-      --data_dictionary outputs/prepared/data_dictionary.json \
-      --output_dir outputs/final_report
+      --profile_json outputs_real/profiles/profile.json \
+      --workflow_plan_json outputs_real/plans/workflow_plan.json \
+      --prepared_panel outputs_real/prepared/prepared_panel.csv \
+      --execution_log outputs_real/prepared/execution_log.json \
+      --initial_validation_report outputs_real/validation/validation_report.json \
+      --repair_plan outputs_real/repaired/repair_plan.json \
+      --repair_log outputs_real/repaired/repair_log.json \
+      --repaired_panel outputs_real/repaired/repaired_panel.csv \
+      --final_validation_report outputs_real/validation_repaired/validation_report.json \
+      --approved_features outputs_real/validation_repaired/approved_feature_columns.json \
+      --data_dictionary outputs_real/prepared/data_dictionary.json \
+      --output_dir outputs_real/final_report
 
 行为：
 1. 只读前五阶段产物。
@@ -39,27 +39,27 @@ from report_generator import ReportGenerator  # noqa: E402
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run the Final Report Generator.")
-    p.add_argument("--profile_json", default="outputs/profiles/profile.json")
-    p.add_argument("--workflow_plan_json", default="outputs/plans/workflow_plan.json")
-    p.add_argument("--prepared_panel", default="outputs/prepared/prepared_panel.csv")
-    p.add_argument("--execution_log", default="outputs/prepared/execution_log.json")
+    p.add_argument("--profile_json", default="outputs_real/profiles/profile.json")
+    p.add_argument("--workflow_plan_json", default="outputs_real/plans/workflow_plan.json")
+    p.add_argument("--prepared_panel", default="outputs_real/prepared/prepared_panel.csv")
+    p.add_argument("--execution_log", default="outputs_real/prepared/execution_log.json")
     p.add_argument(
         "--initial_validation_report",
-        default="outputs/validation/validation_report.json",
+        default="outputs_real/validation/validation_report.json",
     )
-    p.add_argument("--repair_plan", default="outputs/repaired/repair_plan.json")
-    p.add_argument("--repair_log", default="outputs/repaired/repair_log.json")
-    p.add_argument("--repaired_panel", default="outputs/repaired/repaired_panel.csv")
+    p.add_argument("--repair_plan", default="outputs_real/repaired/repair_plan.json")
+    p.add_argument("--repair_log", default="outputs_real/repaired/repair_log.json")
+    p.add_argument("--repaired_panel", default="outputs_real/repaired/repaired_panel.csv")
     p.add_argument(
         "--final_validation_report",
-        default="outputs/validation_repaired/validation_report.json",
+        default="outputs_real/validation_repaired/validation_report.json",
     )
     p.add_argument(
         "--approved_features",
-        default="outputs/validation_repaired/approved_feature_columns.json",
+        default="outputs_real/validation_repaired/approved_feature_columns.json",
     )
-    p.add_argument("--data_dictionary", default="outputs/prepared/data_dictionary.json")
-    p.add_argument("--output_dir", default="outputs/final_report")
+    p.add_argument("--data_dictionary", default="outputs_real/prepared/data_dictionary.json")
+    p.add_argument("--output_dir", default="outputs_real/final_report")
     return p.parse_args()
 
 

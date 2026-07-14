@@ -3,13 +3,13 @@
 用法::
 
     python src/run_critic.py \
-      --panel_path outputs/prepared/prepared_panel.csv \
-      --data_dictionary_path outputs/prepared/data_dictionary.json \
-      --execution_log_path outputs/prepared/execution_log.json \
-      --plan_path outputs/plans/workflow_plan.json \
+      --panel_path outputs_real/prepared/prepared_panel.csv \
+      --data_dictionary_path outputs_real/prepared/data_dictionary.json \
+      --execution_log_path outputs_real/prepared/execution_log.json \
+      --plan_path outputs_real/plans/workflow_plan.json \
       --executor_source_path src/executor.py \
-      --calendar_path data/sample/calendar.csv \
-      --output_dir outputs/validation
+      --calendar_path data/real_market/calendar.csv \
+      --output_dir outputs_real/validation
 
 行为：
 1. 读取 prepared_panel.csv、data_dictionary.json、execution_log.json、workflow_plan.json、executor.py、calendar.csv。
@@ -36,22 +36,22 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run the Validity Critic Agent.")
     p.add_argument(
         "--panel_path",
-        default="outputs/prepared/prepared_panel.csv",
+        default="outputs_real/prepared/prepared_panel.csv",
         help="Path to prepared_panel.csv",
     )
     p.add_argument(
         "--data_dictionary_path",
-        default="outputs/prepared/data_dictionary.json",
+        default="outputs_real/prepared/data_dictionary.json",
         help="Path to data_dictionary.json",
     )
     p.add_argument(
         "--execution_log_path",
-        default="outputs/prepared/execution_log.json",
+        default="outputs_real/prepared/execution_log.json",
         help="Path to execution_log.json",
     )
     p.add_argument(
         "--plan_path",
-        default="outputs/plans/workflow_plan.json",
+        default="outputs_real/plans/workflow_plan.json",
         help="Path to workflow_plan.json",
     )
     p.add_argument(
@@ -61,12 +61,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--calendar_path",
-        default="data/sample/calendar.csv",
+        default="data/real_market/calendar.csv",
         help="Path to calendar.csv (for trading-day alignment check)",
     )
     p.add_argument(
         "--output_dir",
-        default="outputs/validation",
+        default="outputs_real/validation",
         help="Directory to write validation outputs",
     )
     return p.parse_args()

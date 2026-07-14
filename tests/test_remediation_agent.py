@@ -1,8 +1,8 @@
-"""Remediation Agent 单元测试（v2 升级，严格版）。
+"""Remediation Agent 单元测试（v3，基于真实市场 fixture）。
 
 覆盖：
 1. 初始 Critic 已通过时执行 0 轮（validation_passed）。
-2. sample 数据经过一轮修复后收敛（validation_passed after 1 round）。
+2. 真实 fixture 经过一轮修复后收敛（validation_passed after 1 round）。
 3. 没有可用策略时安全停止（no_actionable_strategy）。
 4. failed checks + 内容指纹连续两轮不变 → 严格断言 no_progress。
 5. 每轮有变化但始终 failed → 严格断言 max_rounds_reached。
@@ -13,6 +13,14 @@
 10. run_all 退出码：0 / 1 / 2 三态。
 11. Agent Shell 从 repair_history.json 恢复历史状态。
 12. CLI 参数边界：--max_repair_rounds 0 / --max_row_loss_ratio 越界尽早失败。
+
+v3 改动：
+- 不再依赖合成样例数据（generate_sample_data 已移除）。
+- 集成测试基于真实 fixture test_data/real_market_sample/（600519 / 2024-01-01..2024-01-10）。
+- 故障场景（缺失/重复/no_progress/max_rounds）在 fixture 的**临时副本**上注入，
+  不修改被提交的真实 fixture。
+- 删除对 300/298/固定删 2 行等合成数据规模的硬编码；断言按 fixture 实际行数动态计算。
+- 单元测试仍可用小型内存 DataFrame 验证算法边界，但不把它描述为真实行情数据。
 
 使用标准库 unittest + unittest.mock。所有测试用临时 output_root，不覆盖仓库内现有 outputs。
 """
@@ -37,7 +45,6 @@ for p in (str(SRC), str(HERE.parent)):
 
 import pandas as pd  # noqa: E402
 
-from generate_sample_data import generate_sample_data  # noqa: E402
 from pipeline_runner import PipelineRunner  # noqa: E402
 from repair import (  # noqa: E402
     DEFAULT_STRATEGIES,
@@ -46,6 +53,19 @@ from repair import (  # noqa: E402
     RepairLoop,
     TrimIndustryNameWhitespace,
 )
+
+# 真实市场 fixture 路径（提交在 Git 中的小型真实 A 股数据）
+FIXTURE_DIR = HERE.parent / "test_data" / "real_market_sample"
+
+
+def _copy_fixture(tmp_dir: Path) -> Path:
+    """把真实 fixture 复制到临时目录，返回临时副本路径。
+
+    所有故障注入只修改临时副本，绝不修改被提交的真实 fixture。
+    """
+    dst = tmp_dir / "input"
+    shutil.copytree(FIXTURE_DIR, dst)
+    return dst
 
 
 def _run_to_initial_critic(runner: PipelineRunner) -> None:
@@ -68,8 +88,9 @@ class FakeCriticReport:
     close_missing_rate>0 的 evidence，使 DropRowsWithMissingCorePrice.can_handle
     返回 True（否则策略不匹配 → no_actionable_strategy，而非 max_rounds）。
 
-    注意：failed_names 中不在 ALL_NAMES 里的 check 名（如 synthetic_check_n）
-    会被追加为额外的 failed check 项，确保 failed 集合可变化。
+    注意：failed_names 中不在 ALL_NAMES 里的 check 名（如 injected_check_n，
+    人为注入的测试故障名，不是真实数据抓取结果）会被追加为额外的 failed check 项，
+    确保 failed 集合可变化。
     """
 
     def __init__(self, overall_status: str, failed_names: list[str]):
@@ -114,7 +135,7 @@ class FakeCriticReport:
                 }
             )
             emitted.add(name)
-        # 追加 failed_names 中不在 ALL_NAMES 的 check（如 synthetic_check_n）
+        # 追加 failed_names 中不在 ALL_NAMES 的 check（如 injected_check_n）
         for name in self.failed_names:
             if name in emitted:
                 continue
@@ -192,7 +213,11 @@ class FakeCritic:
 
 
 def _make_panel(n_rows: int = 300, with_close_missing: int = 0) -> pd.DataFrame:
-    """构造一个最小合法 prepared_panel（含 Critic REQUIRED_COLUMNS）。"""
+    """构造一个最小合法 prepared_panel（含 Critic REQUIRED_COLUMNS）。
+
+    注意：这是**单元测试用的内存 DataFrame**，仅用于验证策略算法边界
+    （can_handle / apply 的行为），**不**代表真实行情数据，也不作为正式运行示例。
+    """
     dates = pd.bdate_range("2024-01-02", periods=max(1, n_rows // 5))
     tickers = ["000001", "600000", "AAPL", "510300", "000333"]
     rows = []
@@ -315,9 +340,9 @@ class TestStrategyRegistry(unittest.TestCase):
 class TestRemediationAgent(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="remediation_"))
-        self.input_dir = self.tmp / "data" / "sample"
+        # 真实 fixture 的临时副本；故障注入只改副本，不改被提交的真实 fixture
+        self.input_dir = _copy_fixture(self.tmp)
         self.output_root = self.tmp / "outputs"
-        generate_sample_data(self.input_dir)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -332,7 +357,7 @@ class TestRemediationAgent(unittest.TestCase):
 
     # 1. 初始 Critic 已通过时执行 0 轮
     def test_zero_rounds_when_initial_passed(self):
-        # 清理 price.csv 的 OHLC 缺失行，使 initial critic 不 failed
+        # 清理 price.csv 副本的 OHLC 缺失行，使 initial critic 不 failed
         price_path = self.input_dir / "price.csv"
         df = pd.read_csv(price_path)
         df = df.dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
@@ -350,9 +375,21 @@ class TestRemediationAgent(unittest.TestCase):
         self.assertEqual(rh["repair_rounds"], 0)
         self.assertEqual(rh["termination_reason"], "validation_passed")
 
-    # 2. sample 数据经过一轮修复后收敛
-    def test_sample_converges_after_one_round(self):
-        runner = self._new_runner()
+    # 2. 真实 fixture 经过一轮修复后收敛
+    def test_fixture_converges_after_one_round(self):
+        # 人为注入故障：在 price.csv 副本里制造 2 行 close 缺失，使 initial critic failed
+        price_path = self.input_dir / "price.csv"
+        df = pd.read_csv(price_path)
+        n = len(df)
+        # 注入 2 行 close 缺失（2/n 远小于 5% 安全门，且修复后收敛）
+        inject_idx = df.sample(n=min(2, n), random_state=0).index
+        df.loc[inject_idx, "close"] = None
+        df.to_csv(price_path, index=False, encoding="utf-8-sig")
+
+        # 真实 fixture 仅 7 行，2/n≈28% 会触发默认 5% 安全门而提前转人工，
+        # 无法验证"一轮收敛"路径。这里用宽松阈值 0.5 隔离收敛行为；
+        # 5% 安全门本身由 test_row_loss_over_5_percent_manual_review 独立验证。
+        runner = self._new_runner(max_row_loss_ratio=0.5)
         runner.run_full_pipeline()
         self.assertEqual(runner.repair_rounds_run, 1)
         self.assertEqual(runner.termination_reason, "validation_passed")
@@ -360,9 +397,15 @@ class TestRemediationAgent(unittest.TestCase):
         self.assertEqual(runner.unresolved_checks, [])
         with runner.repair_history_json.open("r", encoding="utf-8") as f:
             rh = json.load(f)
-        self.assertEqual(rh["rounds"][0]["rows_before"], 300)
-        self.assertEqual(rh["rounds"][0]["rows_after"], 298)
-        self.assertEqual(rh["rounds"][0]["cumulative_row_loss_ratio"], round(2 / 300, 6))
+        # 行数按 fixture 实际规模动态断言，不硬编码 300/298
+        rows_before = rh["rounds"][0]["rows_before"]
+        rows_after = rh["rounds"][0]["rows_after"]
+        self.assertEqual(rows_before, n)
+        self.assertEqual(rows_after, n - 2)
+        self.assertEqual(rows_before - rows_after, 2)
+        self.assertEqual(
+            rh["rounds"][0]["cumulative_row_loss_ratio"], round(2 / n, 6)
+        )
 
     # 3. 没有可用策略时安全停止（no_actionable_strategy）
     def test_no_actionable_strategy_safe_stop(self):
@@ -456,23 +499,23 @@ class TestRemediationAgent(unittest.TestCase):
         关键设计：
         - 每轮 failed 必须含 missing_rate_after_join（带 close_missing_rate>0
           evidence），否则策略 can_handle=False → no_actionable_strategy。
-        - 每轮 failed 还含 synthetic_check_n（n 递增），使 failed 集合变化。
-        - panel 指纹必须每轮变化，否则即使 failed 集合变化也会因指纹不变
-          触发 no_progress。我们注入足够多的 close 缺失行（>max_rounds），
-          使策略每轮删 1 行、指纹变化，但累计删行仍 < 5% 安全门。
-        - 注意：fake critic 每轮返回的 failed_after 必须包含 synthetic_check_n
-          （n 递增），否则 failed_after 集合不变 → no_progress。但真实 Critic
-          会重算 missing_rate_after_join（删完 close 缺失后 passed），所以这里
-          用 fake critic 强制每轮 failed_after = [missing_rate_after_join,
-          synthetic_check_n]，使 failed 集合变化 + panel 指纹变化 → 不触发
+        - 每轮 failed 还含 injected_check_n（n 递增，人为注入的测试故障名，
+          不是真实数据抓取结果），使 failed 集合变化。
+        - 第 1 轮策略删除注入的 close 缺失行（panel 指纹变化）；第 2 轮 panel
+          已无 close 缺失，策略删 0 行（指纹不变），但 fake critic 仍返回
+          failed 且 failed 集合变化（injected_check_n 递增）→ 不触发
           no_progress → 达到 max_rounds → max_rounds_reached。
+        - 真实 fixture 仅 7 行，注入 1 行 close 缺失即 1/7≈14%；用宽松阈值
+          0.5 隔离 max_rounds 路径（5% 安全门本身由
+          test_row_loss_over_5_percent_manual_review 独立验证）。
         """
-        runner = self._new_runner(max_repair_rounds=2)
+        runner = self._new_runner(max_repair_rounds=2, max_row_loss_ratio=0.5)
         _run_to_initial_critic(runner)
-        # 注入 5 行 close 缺失（5/300≈1.7% < 5% 安全门；> max_rounds=2）
+        # 人为注入故障：在 prepared_panel 副本注入 1 行 close 缺失
         df = pd.read_csv(runner.prepared_panel)
+        n = len(df)
         cur_missing = int(df["close"].isna().sum())
-        need = max(0, 5 - cur_missing)
+        need = max(0, 1 - cur_missing)
         if need > 0:
             extra = df[df["close"].notna()].sample(n=need, random_state=0).index
             df.loc[extra, "close"] = None
@@ -488,14 +531,15 @@ class TestRemediationAgent(unittest.TestCase):
         with runner.initial_validation_json.open("w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
 
-        # fake critic：每轮返回 [missing_rate_after_join, synthetic_check_n]，
+        # fake critic：每轮返回 [missing_rate_after_join, injected_check_n]，
         # n 递增使 failed check 集合变化（避免 no_progress），但始终 failed。
+        # injected_check_n 是人为注入的测试故障名，不是真实数据抓取结果。
         call_count = {"n": 0}
 
         def factory():
             call_count["n"] += 1
             n = call_count["n"]
-            failed = ["missing_rate_after_join", f"synthetic_check_{n}"]
+            failed = ["missing_rate_after_join", f"injected_check_{n}"]
             return FakeCritic(lambda: FakeCriticReport("failed", failed).to_report())
 
         runner._critic_factory = factory
@@ -518,7 +562,8 @@ class TestRemediationAgent(unittest.TestCase):
         panel_path = runner.prepared_panel
         df = pd.read_csv(panel_path)
         n = len(df)
-        n_inject = int(n * 0.10)
+        # 真实 fixture 仅 7 行；注入 1 行 close 缺失即 1/7≈14% > 5% 安全门
+        n_inject = 1
         inject_idx = df.sample(n=n_inject, random_state=0).index
         df.loc[inject_idx, "close"] = None
         df.to_csv(panel_path, index=False, encoding="utf-8-sig")
@@ -557,7 +602,8 @@ class TestRemediationAgent(unittest.TestCase):
         _run_to_initial_critic(runner)
         panel_path = runner.prepared_panel
         df = pd.read_csv(panel_path)
-        n_inject = int(len(df) * 0.10)
+        # 真实 fixture 仅 7 行；注入 1 行 close 缺失即超 5% 安全门 → manual review
+        n_inject = 1
         inject_idx = df.sample(n=n_inject, random_state=0).index
         df.loc[inject_idx, "close"] = None
         df.to_csv(panel_path, index=False, encoding="utf-8-sig")
@@ -578,9 +624,9 @@ class TestRemediationAgent(unittest.TestCase):
 class TestExitCodes(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="exitcode_"))
-        self.input_dir = self.tmp / "data" / "sample"
+        # 真实 fixture 的临时副本
+        self.input_dir = _copy_fixture(self.tmp)
         self.output_root = self.tmp / "outputs"
-        generate_sample_data(self.input_dir)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -603,21 +649,31 @@ class TestExitCodes(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_exit_0_when_one_round_converges(self):
-        # sample 数据一轮收敛 → EXIT=0
-        code = self._run_all()
+        # 人为注入 2 行 close 缺失 → 一轮收敛 → EXIT=0
+        # 真实 fixture 仅 7 行，2/7≈28% 会触发默认 5% 安全门；放宽阈值以隔离收敛路径
+        df = pd.read_csv(self.input_dir / "price.csv")
+        n = len(df)
+        idx = df.sample(n=min(2, n), random_state=0).index
+        df.loc[idx, "close"] = None
+        df.to_csv(self.input_dir / "price.csv", index=False, encoding="utf-8-sig")
+        code = self._run_all("--max_row_loss_ratio", "0.5")
         self.assertEqual(code, 0)
 
     def test_exit_2_when_manual_review(self):
-        # 注入 10% close 缺失 → manual_review_required → EXIT=2
+        # 注入 1 行 close 缺失（1/7≈14% > 5% 安全门）→ manual_review_required → EXIT=2
         df = pd.read_csv(self.input_dir / "price.csv")
-        idx = df.sample(n=int(len(df) * 0.10), random_state=0).index
+        idx = df.sample(n=1, random_state=0).index
         df.loc[idx, "close"] = None
         df.to_csv(self.input_dir / "price.csv", index=False, encoding="utf-8-sig")
         code = self._run_all()
         self.assertEqual(code, 2)
 
     def test_exit_2_when_no_repair_and_initial_failed(self):
-        # --no_repair + initial failed → EXIT=2
+        # 人为注入 close 缺失使 initial failed + --no_repair → EXIT=2
+        df = pd.read_csv(self.input_dir / "price.csv")
+        idx = df.sample(n=min(2, len(df)), random_state=0).index
+        df.loc[idx, "close"] = None
+        df.to_csv(self.input_dir / "price.csv", index=False, encoding="utf-8-sig")
         code = self._run_all("--no_repair")
         self.assertEqual(code, 2)
         with open(self.output_root / "repaired" / "repair_history.json", encoding="utf-8") as f:
@@ -645,19 +701,26 @@ class TestExitCodes(unittest.TestCase):
 class TestShellStateRestore(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="shellrestore_"))
-        self.input_dir = self.tmp / "data" / "sample"
+        # 真实 fixture 的临时副本
+        self.input_dir = _copy_fixture(self.tmp)
         self.output_root = self.tmp / "outputs"
-        generate_sample_data(self.input_dir)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_status_restores_from_repair_history(self):
+        # 人为注入 2 行 close 缺失，使 pipeline 跑 1 轮修复后收敛
+        # 真实 fixture 仅 7 行，2/7≈28% 会触发默认 5% 安全门；放宽阈值以隔离收敛路径
+        df = pd.read_csv(self.input_dir / "price.csv")
+        idx = df.sample(n=min(2, len(df)), random_state=0).index
+        df.loc[idx, "close"] = None
+        df.to_csv(self.input_dir / "price.csv", index=False, encoding="utf-8-sig")
         # 先跑一次完整 pipeline，产生 repair_history.json
         r = subprocess.run(
             [sys.executable, "-B", "src/run_all.py",
              "--input_dir", str(self.input_dir),
-             "--output_root", str(self.output_root)],
+             "--output_root", str(self.output_root),
+             "--max_row_loss_ratio", "0.5"],
             capture_output=True, text=True, cwd=str(HERE.parent),
         )
         self.assertEqual(r.returncode, 0)
@@ -672,11 +735,18 @@ class TestShellStateRestore(unittest.TestCase):
         self.assertFalse(status["manual_review_required"])
 
     def test_shell_demo_shows_restored_state(self):
+        # 人为注入 2 行 close 缺失，使 pipeline 跑 1 轮修复后收敛
+        # 真实 fixture 仅 7 行，2/7≈28% 会触发默认 5% 安全门；放宽阈值以隔离收敛路径
+        df = pd.read_csv(self.input_dir / "price.csv")
+        idx = df.sample(n=min(2, len(df)), random_state=0).index
+        df.loc[idx, "close"] = None
+        df.to_csv(self.input_dir / "price.csv", index=False, encoding="utf-8-sig")
         # 先跑一次完整 pipeline
         subprocess.run(
             [sys.executable, "-B", "src/run_all.py",
              "--input_dir", str(self.input_dir),
-             "--output_root", str(self.output_root)],
+             "--output_root", str(self.output_root),
+             "--max_row_loss_ratio", "0.5"],
             capture_output=True, text=True, cwd=str(HERE.parent),
         )
         # 用 agent_shell --demo_commands 指向已有 outputs
@@ -701,36 +771,45 @@ class TestShellStateRestore(unittest.TestCase):
 
 
 class TestRepairHistorySchema(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="schema_"))
+        # 真实 fixture 的临时副本
+        self.input_dir = _copy_fixture(self.tmp)
+        self.output_root = self.tmp / "outputs"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
     def test_history_has_required_fields(self):
-        tmp = Path(tempfile.mkdtemp(prefix="schema_"))
-        try:
-            input_dir = tmp / "data" / "sample"
-            output_root = tmp / "outputs"
-            generate_sample_data(input_dir)
-            runner = PipelineRunner(
-                input_dir=input_dir, output_root=output_root, verbose=False
-            )
-            runner.run_full_pipeline()
-            with runner.repair_history_json.open("r", encoding="utf-8") as f:
-                rh = json.load(f)
+        # 人为注入 2 行 close 缺失，使 pipeline 跑 1 轮修复
+        # 真实 fixture 仅 7 行，2/7≈28% 会触发默认 5% 安全门；放宽阈值以隔离收敛路径
+        df = pd.read_csv(self.input_dir / "price.csv")
+        idx = df.sample(n=min(2, len(df)), random_state=0).index
+        df.loc[idx, "close"] = None
+        df.to_csv(self.input_dir / "price.csv", index=False, encoding="utf-8-sig")
+        runner = PipelineRunner(
+            input_dir=self.input_dir, output_root=self.output_root, verbose=False,
+            max_row_loss_ratio=0.5,
+        )
+        runner.run_full_pipeline()
+        with runner.repair_history_json.open("r", encoding="utf-8") as f:
+            rh = json.load(f)
+        for k in [
+            "project", "repair_version", "max_repair_rounds",
+            "max_row_loss_ratio", "repair_rounds", "termination_reason",
+            "manual_review_required", "unresolved_checks", "rounds",
+        ]:
+            self.assertIn(k, rh, f"missing top-level field {k}")
+        if rh["rounds"]:
+            r = rh["rounds"][0]
             for k in [
-                "project", "repair_version", "max_repair_rounds",
-                "max_row_loss_ratio", "repair_rounds", "termination_reason",
-                "manual_review_required", "unresolved_checks", "rounds",
+                "round", "validation_status_before", "failed_checks_before",
+                "candidate_strategies", "selected_strategies", "decision_reason",
+                "rows_before", "rows_after", "cumulative_row_loss_ratio",
+                "validation_status_after", "failed_checks_after",
+                "panel_fingerprint", "termination_reason",
             ]:
-                self.assertIn(k, rh, f"missing top-level field {k}")
-            if rh["rounds"]:
-                r = rh["rounds"][0]
-                for k in [
-                    "round", "validation_status_before", "failed_checks_before",
-                    "candidate_strategies", "selected_strategies", "decision_reason",
-                    "rows_before", "rows_after", "cumulative_row_loss_ratio",
-                    "validation_status_after", "failed_checks_after",
-                    "panel_fingerprint", "termination_reason",
-                ]:
-                    self.assertIn(k, r, f"missing round field {k}")
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+                self.assertIn(k, r, f"missing round field {k}")
 
 
 if __name__ == "__main__":

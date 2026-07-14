@@ -6,7 +6,7 @@
 
 可选参数::
 
-    python src/run_all.py --input_dir data/sample --output_root outputs
+    python src/run_all.py --input_dir data/real_market --output_root outputs_real
     python src/run_all.py --analysis_goal "构建一个用于 5 日收益率预测的日频建模宽表"
     python src/run_all.py --no_repair
     python src/run_all.py --skip_report
@@ -21,7 +21,8 @@
 
 设计原则：
 - 只作为统一入口，业务调度放在 PipelineRunner 中，不复制粘贴业务逻辑。
-- 不调用外部 LLM API，离线可运行，不连接真实券商系统，不获取真实市场数据。
+- 不调用外部 LLM API，离线可运行，不连接真实券商系统。
+- v3：只处理真实市场数据；输入目录不存在/为空时明确失败，不再自动生成合成样例数据。
 - 路径用 pathlib，兼容 Windows，不写死绝对路径。
 """
 
@@ -45,13 +46,13 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--input_dir",
-        default="data/sample",
-        help="Directory containing raw CSV files (default: data/sample)",
+        default="data/real_market",
+        help="Directory containing real market CSV files (default: data/real_market)",
     )
     p.add_argument(
         "--output_root",
-        default="outputs",
-        help="Root directory for all stage outputs (default: outputs)",
+        default="outputs_real",
+        help="Root directory for all stage outputs (default: outputs_real)",
     )
     p.add_argument(
         "--analysis_goal",

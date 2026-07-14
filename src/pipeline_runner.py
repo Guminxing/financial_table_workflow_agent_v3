@@ -33,7 +33,6 @@ if str(HERE) not in sys.path:
 
 from critic import ValidityCritic  # noqa: E402
 from executor import CodeExecutor  # noqa: E402
-from generate_sample_data import generate_sample_data  # noqa: E402
 from planner import DEFAULT_ANALYSIS_GOAL, WorkflowPlanner  # noqa: E402
 from profiler import FinancialTableProfiler  # noqa: E402
 from repair import REPAIR_VERSION, RepairLoop  # noqa: E402
@@ -77,8 +76,8 @@ class PipelineRunner:
     用法::
 
         runner = PipelineRunner(
-            input_dir="data/sample",
-            output_root="outputs",
+            input_dir="data/real_market",
+            output_root="outputs_real",
             analysis_goal=None,
             auto_repair=True,
         )
@@ -89,8 +88,8 @@ class PipelineRunner:
 
     def __init__(
         self,
-        input_dir: str | Path = "data/sample",
-        output_root: str | Path = "outputs",
+        input_dir: str | Path = "data/real_market",
+        output_root: str | Path = "outputs_real",
         analysis_goal: str | None = None,
         auto_repair: bool = True,
         skip_report: bool = False,
@@ -476,22 +475,28 @@ class PipelineRunner:
     # ------------------------------------------------------------------
 
     def _profile_impl(self) -> dict[str, Any]:
-        """Stage 1 实现：必要时生成样例数据，再剖析。"""
-        # 若 input_dir 下没有 CSV，自动生成样例数据
-        csv_files = (
-            sorted(self.input_dir.glob("*.csv"))
-            if self.input_dir.exists()
-            else []
-        )
-        if not csv_files:
-            print(
-                "[pipeline] Sample data missing; generating synthetic sample "
-                "data for demo."
+        """Stage 1 实现：剖析真实市场数据目录。
+
+        v3：不再自动生成合成样例数据。若 input_dir 不存在、为空或缺少 CSV，
+        直接抛错并给出可操作错误信息，绝不静默回退到合成数据。
+        """
+        if not self.input_dir.exists():
+            raise FileNotFoundError(
+                f"input_dir does not exist: {self.input_dir}. "
+                "Download real market data first, e.g.:\n"
+                "  python -B src/run_fetch_real_data.py --tickers 600519 "
+                "--start_date 2024-01-01 --end_date 2024-01-10 "
+                "--output_dir data/real_market "
+                "--tradingagents_path D:\\dwzq\\TradingAgents-astock-main "
+                "--no_snapshot_fundamentals"
             )
-            generate_sample_data(self.input_dir)
-            csv_files = sorted(self.input_dir.glob("*.csv"))
+        csv_files = sorted(self.input_dir.glob("*.csv"))
         if not csv_files:
-            raise RuntimeError(f"no CSV files in {self.input_dir}")
+            raise FileNotFoundError(
+                f"no CSV files in {self.input_dir}. "
+                "Download real market data first (see run_fetch_real_data.py); "
+                "synthetic sample data generation has been removed in v3."
+            )
 
         profiler = FinancialTableProfiler(self.input_dir)
         profile = profiler.run()

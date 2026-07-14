@@ -235,7 +235,7 @@ flowchart TD
 - **初始** `prepared_panel.csv`：300 行 × 22 列，5 个 ticker，2024-01-02 ~ 2024-03-25，主键唯一。
 - **初始 Critic**：15 项检查 14 passed / 1 failed。failed = `missing_rate_after_join`，`close` 缺失率 0.0067（2 行）。
 - **Repair Loop**：策略 `drop_rows_with_missing_core_price`（保守删除，不插值），删除 2 行，产出 298 行 `repaired_panel.csv`。修复后自检：close 缺失=0、主键唯一、label 保留、label 不在 approved features。
-- **复审 Critic**：15 项 14 passed / 1 warning / 0 failed。`close` 缺失率降为 0.0；剩余 warning 为 pe/pb/roe 高缺失（财务公告频率低，合理）与 industry 缺失（模拟数据设计），非失败。
+- **复审 Critic**：15 项 14 passed / 1 warning / 0 failed。`close` 缺失率降为 0.0；剩余 warning 为 pe/pb/roe 高缺失（财务公告频率低，合理），非失败。
 - **approved_feature_columns**（8 个特征，复审后不变）：`return_1d`、`return_5d`、`volatility_20d`、`turnover_20d`、`pe`、`pb`、`roe`、`industry_name`。
 - **label_column**：`label_next_5d`（role=label），**不在** approved features 中——标签泄漏被结构性预防。
 
@@ -269,19 +269,22 @@ flowchart TD
 ```
 financial_table_workflow_agent/
 ├── README.md
+├── DIRECTORY_GUIDE.md          # 目录职责说明
 ├── requirements.txt            # 仅需 pandas
 ├── .gitignore
-├── data/sample/                # 模拟样例数据（generate_sample_data.py 生成）
-├── src/                        # 六阶段源码 + CLI
-│   ├── generate_sample_data.py
+├── data/real_market/           # 用户运行时下载的真实市场数据（不提交 Git）
+├── test_data/real_market_sample/  # 小型真实测试 fixture（提交 Git，仅用于测试/最小演示）
+├── src/                        # 六阶段源码 + CLI + 真实数据适配器
+│   ├── real_data_adapter.py / run_fetch_real_data.py
 │   ├── profiler.py / run_profile.py
 │   ├── planner.py / run_planner.py
 │   ├── executor.py / run_executor.py
 │   ├── critic.py / run_critic.py
 │   ├── repair.py / run_repair.py
+│   ├── pipeline_runner.py / run_all.py / agent_shell.py
 │   └── report_generator.py / run_report_generator.py
 ├── prompts/workflow_planner_prompt.md   # LLM Planner Prompt 模板（供后续接入）
-├── outputs/                    # 各阶段产物
+├── outputs_real/               # 各阶段产物（不提交 Git）
 │   ├── profiles/  plans/  prepared/
 │   ├── validation/  repaired/  validation_repaired/
 │   └── final_report/
@@ -292,25 +295,25 @@ financial_table_workflow_agent/
 
 ```bash
 pip install -r requirements.txt
-python src/generate_sample_data.py
-python src/run_profile.py    --input_dir data/sample --output_dir outputs/profiles
-python src/run_planner.py    --profile_path outputs/profiles/profile.json --output_dir outputs/plans
-python src/run_executor.py   --input_dir data/sample --plan_path outputs/plans/workflow_plan.json --output_dir outputs/prepared
-python src/run_critic.py     --panel_path outputs/prepared/prepared_panel.csv --data_dictionary_path outputs/prepared/data_dictionary.json --execution_log_path outputs/prepared/execution_log.json --plan_path outputs/plans/workflow_plan.json --executor_source_path src/executor.py --calendar_path data/sample/calendar.csv --output_dir outputs/validation
-python src/run_repair.py     --panel_path outputs/prepared/prepared_panel.csv --validation_report_path outputs/validation/validation_report.json --data_dictionary_path outputs/prepared/data_dictionary.json --approved_features_path outputs/validation/approved_feature_columns.json --output_dir outputs/repaired
-python src/run_critic.py     --panel_path outputs/repaired/repaired_panel.csv --data_dictionary_path outputs/prepared/data_dictionary.json --execution_log_path outputs/prepared/execution_log.json --plan_path outputs/plans/workflow_plan.json --executor_source_path src/executor.py --calendar_path data/sample/calendar.csv --output_dir outputs/validation_repaired
-python src/run_report_generator.py --profile_json outputs/profiles/profile.json --workflow_plan_json outputs/plans/workflow_plan.json --prepared_panel outputs/prepared/prepared_panel.csv --execution_log outputs/prepared/execution_log.json --initial_validation_report outputs/validation/validation_report.json --repair_plan outputs/repaired/repair_plan.json --repair_log outputs/repaired/repair_log.json --repaired_panel outputs/repaired/repaired_panel.csv --final_validation_report outputs/validation_repaired/validation_report.json --approved_features outputs/validation_repaired/approved_feature_columns.json --data_dictionary outputs/prepared/data_dictionary.json --output_dir outputs/final_report
+python src/run_fetch_real_data.py --tickers 600519 --start_date 2024-01-01 --end_date 2024-01-10 --output_dir data/real_market --tradingagents_path D:\dwzq\TradingAgents-astock-main --no_snapshot_fundamentals
+python src/run_profile.py    --input_dir data/real_market --output_dir outputs_real/profiles
+python src/run_planner.py    --profile_path outputs_real/profiles/profile.json --output_dir outputs_real/plans
+python src/run_executor.py   --input_dir data/real_market --plan_path outputs_real/plans/workflow_plan.json --output_dir outputs_real/prepared
+python src/run_critic.py     --panel_path outputs_real/prepared/prepared_panel.csv --data_dictionary_path outputs_real/prepared/data_dictionary.json --execution_log_path outputs_real/prepared/execution_log.json --plan_path outputs_real/plans/workflow_plan.json --executor_source_path src/executor.py --calendar_path data/real_market/calendar.csv --output_dir outputs_real/validation
+python src/run_repair.py     --panel_path outputs_real/prepared/prepared_panel.csv --validation_report_path outputs_real/validation/validation_report.json --data_dictionary_path outputs_real/prepared/data_dictionary.json --approved_features_path outputs_real/validation/approved_feature_columns.json --output_dir outputs_real/repaired
+python src/run_critic.py     --panel_path outputs_real/repaired/repaired_panel.csv --data_dictionary_path outputs_real/prepared/data_dictionary.json --execution_log_path outputs_real/prepared/execution_log.json --plan_path outputs_real/plans/workflow_plan.json --executor_source_path src/executor.py --calendar_path data/real_market/calendar.csv --output_dir outputs_real/validation_repaired
+python src/run_report_generator.py --profile_json outputs_real/profiles/profile.json --workflow_plan_json outputs_real/plans/workflow_plan.json --prepared_panel outputs_real/prepared/prepared_panel.csv --execution_log outputs_real/prepared/execution_log.json --initial_validation_report outputs_real/validation/validation_report.json --repair_plan outputs_real/repaired/repair_plan.json --repair_log outputs_real/repaired/repair_log.json --repaired_panel outputs_real/repaired/repaired_panel.csv --final_validation_report outputs_real/validation_repaired/validation_report.json --approved_features outputs_real/validation_repaired/approved_feature_columns.json --data_dictionary outputs_real/prepared/data_dictionary.json --output_dir outputs_real/final_report
 ```
 
-> 若 `data/sample/` 下没有 CSV，`run_profile.py` 会自动调用 `generate_sample_data` 生成样例数据。
-> 全流程离线运行，不调用外部 API，不连接真实券商系统。
+> v3 已移除合成样例数据与自动生成逻辑；输入目录不存在/为空时明确失败，不再自动生成样例数据。
+> 全流程离线运行（数据抓取阶段需网络），不调用外部 API，不连接真实券商交易系统。
 
 ---
 
 ## 8. 局限性
 
 - 全部六阶段均为**确定性 baseline**，不调用任何 LLM API。
-- 使用 `generate_sample_data.py` 生成的**模拟数据**，非真实业务数据。
+- v3 起使用**真实市场数据**（经适配器抓取的 A 股行情）；合成样例数据已移除。
 - **不训练任何预测模型**，不做回测，不做策略评估。
 - **不输出任何投资建议**，不连接真实券商/行情/交易系统。
 - Critic 对 rolling 是否完全无未来函数的判断**部分依赖源码静态分析**，未实现动态执行追踪。

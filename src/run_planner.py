@@ -2,11 +2,11 @@
 
 用法::
 
-    python src/run_planner.py --profile_path outputs/profiles/profile.json --output_dir outputs/plans
+    python src/run_planner.py --profile_path outputs_real/profiles/profile.json --output_dir outputs_real/plans
 
 可选::
 
-    python src/run_planner.py --profile_path outputs/profiles/profile.json --output_dir outputs/plans --analysis_goal "..."
+    python src/run_planner.py --profile_path outputs_real/profiles/profile.json --output_dir outputs_real/plans --analysis_goal "..."
 
 行为：
 1. 读取 profile.json。
@@ -33,13 +33,13 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run the Workflow Planner Agent.")
     p.add_argument(
         "--profile_path",
-        default="outputs/profiles/profile.json",
-        help="Path to profile.json (default: outputs/profiles/profile.json)",
+        default="outputs_real/profiles/profile.json",
+        help="Path to profile.json (default: outputs_real/profiles/profile.json)",
     )
     p.add_argument(
         "--output_dir",
-        default="outputs/plans",
-        help="Directory to write workflow_plan.json and workflow_plan_report.md (default: outputs/plans)",
+        default="outputs_real/plans",
+        help="Directory to write workflow_plan.json and workflow_plan_report.md (default: outputs_real/plans)",
     )
     p.add_argument(
         "--analysis_goal",

@@ -167,7 +167,7 @@
 
 ```python
 prompt = open("prompts/workflow_planner_prompt.md", encoding="utf-8").read()
-profile = json.load(open("outputs/profiles/profile.json", encoding="utf-8"))
+profile = json.load(open("outputs_real/profiles/profile.json", encoding="utf-8"))
 user_msg = (
     f"{prompt}\n\n"
     f"## profile.json\n```json\n{json.dumps(profile, ensure_ascii=False, indent=2)}\n```\n\n"

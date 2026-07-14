@@ -26,7 +26,7 @@ DEFAULT_ANALYSIS_GOAL = (
     "标签为未来 5 日收益率 label_next_5d，并检查是否存在未来函数或数据泄漏。"
 )
 
-# ---- 表名常量（与 generate_sample_data 保持一致） -----------------------
+# ---- 表名常量（五张 CSV 固定文件名） -----------------------
 
 T_PRICE = "price.csv"
 T_VOLUME = "volume.csv"
@@ -45,10 +45,10 @@ class WorkflowPlanner:
     用法::
 
         planner = WorkflowPlanner()
-        profile = planner.load_profile("outputs/profiles/profile.json")
+        profile = planner.load_profile("outputs_real/profiles/profile.json")
         plan = planner.build_plan(profile, analysis_goal)
-        planner.save_plan(plan, "outputs/plans/workflow_plan.json")
-        planner.save_markdown_report(plan, "outputs/plans/workflow_plan_report.md")
+        planner.save_plan(plan, "outputs_real/plans/workflow_plan.json")
+        planner.save_markdown_report(plan, "outputs_real/plans/workflow_plan_report.md")
     """
 
     # ------------------------------------------------------------------

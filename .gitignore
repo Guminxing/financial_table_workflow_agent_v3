@@ -22,16 +22,34 @@ Thumbs.db
 *.tmp
 *.bak
 
-# Real A-share data fetch outputs (Stage 8)
+# ---- v3 directory policy -------------------------------------------------
+# Real market data downloaded by the user at runtime (NOT committed).
+data/real_market/*
+!data/real_market/.gitkeep
+
+# Formal pipeline outputs (NOT committed; regenerated each run).
+outputs_real/*
+!outputs_real/.gitkeep
+outputs_real_verify/
+
+# Real data fetch cache + throwaway test outputs (NOT committed).
+outputs/cache/
+outputs/sessions/
+outputs_norepair_test/
+
+# Legacy synthetic-data paths (removed in v3; keep ignored in case of stragglers).
+data/sample/
 data/raw_real/
 data/raw_real_verify/
 data/**/_cache/
-outputs_real/
-outputs_real_verify/
 
-# Real data fetch cache + throwaway test outputs
-outputs/cache/
-outputs_norepair_test/
+# Credentials / secrets — never commit.
+.env
+.env.*
+*.key
+*.pem
+*.cookie
+*token*.txt
 
-# Runtime session logs (regenerated each run; latest_session.json is overwritten)
-outputs/sessions/
+# Test caches.
+.pytest_cache/

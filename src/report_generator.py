@@ -29,23 +29,23 @@ class ReportGenerator:
 
         gen = ReportGenerator()
         gen.load_inputs(
-            profile_json="outputs/profiles/profile.json",
-            workflow_plan_json="outputs/plans/workflow_plan.json",
-            prepared_panel="outputs/prepared/prepared_panel.csv",
-            execution_log="outputs/prepared/execution_log.json",
-            initial_validation_report="outputs/validation/validation_report.json",
-            repair_plan="outputs/repaired/repair_plan.json",
-            repair_log="outputs/repaired/repair_log.json",
-            repaired_panel="outputs/repaired/repaired_panel.csv",
-            final_validation_report="outputs/validation_repaired/validation_report.json",
-            approved_features="outputs/validation_repaired/approved_feature_columns.json",
-            data_dictionary="outputs/prepared/data_dictionary.json",
+            profile_json="outputs_real/profiles/profile.json",
+            workflow_plan_json="outputs_real/plans/workflow_plan.json",
+            prepared_panel="outputs_real/prepared/prepared_panel.csv",
+            execution_log="outputs_real/prepared/execution_log.json",
+            initial_validation_report="outputs_real/validation/validation_report.json",
+            repair_plan="outputs_real/repaired/repair_plan.json",
+            repair_log="outputs_real/repaired/repair_log.json",
+            repaired_panel="outputs_real/repaired/repaired_panel.csv",
+            final_validation_report="outputs_real/validation_repaired/validation_report.json",
+            approved_features="outputs_real/validation_repaired/approved_feature_columns.json",
+            data_dictionary="outputs_real/prepared/data_dictionary.json",
         )
         summary = gen.build_summary()
         index = gen.build_artifacts_index()
         full = gen.render_full_report()
         one = gen.render_one_page()
-        paths = gen.save_all("outputs/final_report")
+        paths = gen.save_all("outputs_real/final_report")
     """
 
     def __init__(self) -> None:
@@ -315,7 +315,7 @@ class ReportGenerator:
                 "Report Generator is a deterministic baseline; no LLM is called.",
                 "It only reads prior-stage artifacts; it does not re-run any stage.",
                 "No model is trained; no investment advice is produced.",
-                "Only simulated sample data is used, not real broker data.",
+                "Only real market data fetched via the adapter is used, not broker data.",
             ],
         }
 
@@ -340,28 +340,28 @@ class ReportGenerator:
                 }
             )
 
-        add("stage1_profiler", "outputs/profiles/profile.json", "机器可读数据画像")
-        add("stage1_profiler", "outputs/profiles/profile_report.md", "人类可读画像报告")
-        add("stage2_planner", "outputs/plans/workflow_plan.json", "机器可读数据准备计划")
-        add("stage2_planner", "outputs/plans/workflow_plan_report.md", "人类可读计划报告")
-        add("stage3_executor", "outputs/prepared/prepared_panel.csv", "analysis-ready 宽表（初始）")
-        add("stage3_executor", "outputs/prepared/data_dictionary.json", "字段口径说明")
-        add("stage3_executor", "outputs/prepared/execution_log.json", "执行日志")
-        add("stage3_executor", "outputs/prepared/execution_report.md", "执行报告")
-        add("stage4_critic", "outputs/validation/validation_report.json", "初始有效性审查报告")
-        add("stage4_critic", "outputs/validation/validation_report.md", "初始审查报告（人类可读）")
-        add("stage4_critic", "outputs/validation/approved_feature_columns.json", "初始 approved features")
-        add("stage5_repair", "outputs/repaired/repair_plan.json", "修复方案")
-        add("stage5_repair", "outputs/repaired/repaired_panel.csv", "修复后 panel")
-        add("stage5_repair", "outputs/repaired/repair_log.json", "修复日志")
-        add("stage5_repair", "outputs/repaired/repair_report.md", "修复报告")
-        add("stage6_rerun_critic", "outputs/validation_repaired/validation_report.json", "复审报告")
-        add("stage6_rerun_critic", "outputs/validation_repaired/validation_report.md", "复审报告（人类可读）")
-        add("stage6_rerun_critic", "outputs/validation_repaired/approved_feature_columns.json", "复审 approved features")
-        add("stage6_report", "outputs/final_report/final_workflow_summary.json", "六阶段汇总 JSON")
-        add("stage6_report", "outputs/final_report/final_workflow_report.md", "最终总报告")
-        add("stage6_report", "outputs/final_report/final_workflow_one_page.md", "一页摘要")
-        add("stage6_report", "outputs/final_report/pipeline_artifacts_index.json", "产物索引")
+        add("stage1_profiler", "outputs_real/profiles/profile.json", "机器可读数据画像")
+        add("stage1_profiler", "outputs_real/profiles/profile_report.md", "人类可读画像报告")
+        add("stage2_planner", "outputs_real/plans/workflow_plan.json", "机器可读数据准备计划")
+        add("stage2_planner", "outputs_real/plans/workflow_plan_report.md", "人类可读计划报告")
+        add("stage3_executor", "outputs_real/prepared/prepared_panel.csv", "analysis-ready 宽表（初始）")
+        add("stage3_executor", "outputs_real/prepared/data_dictionary.json", "字段口径说明")
+        add("stage3_executor", "outputs_real/prepared/execution_log.json", "执行日志")
+        add("stage3_executor", "outputs_real/prepared/execution_report.md", "执行报告")
+        add("stage4_critic", "outputs_real/validation/validation_report.json", "初始有效性审查报告")
+        add("stage4_critic", "outputs_real/validation/validation_report.md", "初始审查报告（人类可读）")
+        add("stage4_critic", "outputs_real/validation/approved_feature_columns.json", "初始 approved features")
+        add("stage5_repair", "outputs_real/repaired/repair_plan.json", "修复方案")
+        add("stage5_repair", "outputs_real/repaired/repaired_panel.csv", "修复后 panel")
+        add("stage5_repair", "outputs_real/repaired/repair_log.json", "修复日志")
+        add("stage5_repair", "outputs_real/repaired/repair_report.md", "修复报告")
+        add("stage6_rerun_critic", "outputs_real/validation_repaired/validation_report.json", "复审报告")
+        add("stage6_rerun_critic", "outputs_real/validation_repaired/validation_report.md", "复审报告（人类可读）")
+        add("stage6_rerun_critic", "outputs_real/validation_repaired/approved_feature_columns.json", "复审 approved features")
+        add("stage6_report", "outputs_real/final_report/final_workflow_summary.json", "六阶段汇总 JSON")
+        add("stage6_report", "outputs_real/final_report/final_workflow_report.md", "最终总报告")
+        add("stage6_report", "outputs_real/final_report/final_workflow_one_page.md", "一页摘要")
+        add("stage6_report", "outputs_real/final_report/pipeline_artifacts_index.json", "产物索引")
 
         n_total = len(items)
         n_exists = sum(1 for it in items if it["exists"])

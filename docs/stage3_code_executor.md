@@ -38,20 +38,20 @@ raw CSV ────────────────────────
 
 ### 输入
 
-- `data/sample/` 下的 5 张 CSV：price / volume / fundamentals / industry / calendar
-- `outputs/plans/workflow_plan.json`
+- `data/real_market/` 下的 5 张 CSV：price / volume / fundamentals / industry / calendar
+- `outputs_real/plans/workflow_plan.json`
 
 ### 输出
 
-- `outputs/prepared/prepared_panel.csv`：analysis-ready 日频 ticker-date panel
-- `outputs/prepared/data_dictionary.json`：字段口径说明（role = primary_key / raw_input / feature / label / source_flag）
-- `outputs/prepared/execution_log.json`：执行步骤、警告、质量检查、最终表摘要
-- `outputs/prepared/execution_report.md`：人类可读执行报告
+- `outputs_real/prepared/prepared_panel.csv`：analysis-ready 日频 ticker-date panel
+- `outputs_real/prepared/data_dictionary.json`：字段口径说明（role = primary_key / raw_input / feature / label / source_flag）
+- `outputs_real/prepared/execution_log.json`：执行步骤、警告、质量检查、最终表摘要
+- `outputs_real/prepared/execution_report.md`：人类可读执行报告
 
 ### 运行命令
 
 ```bash
-python src/run_executor.py --input_dir data/sample --plan_path outputs/plans/workflow_plan.json --output_dir outputs/prepared
+python src/run_executor.py --input_dir data/real_market --plan_path outputs_real/plans/workflow_plan.json --output_dir outputs_real/prepared
 ```
 
 ---

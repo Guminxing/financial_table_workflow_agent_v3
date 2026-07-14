@@ -96,8 +96,8 @@ outputs/sessions/latest_session.json + session_YYYYMMDD_HHMMSS.json
 ```
 [run_all] Financial Table Workflow Agent
 
-Input dir: data/sample
-Output root: outputs
+Input dir: data/real_market
+Output root: outputs_real
 Analysis goal: ...
 
 Stage 1 Data Profiler .......... completed
@@ -109,20 +109,20 @@ Stage 6 Re-run Critic .......... passed_with_warnings
 Stage 7 Final Report ........... completed
 
 Final status: passed_with_warnings
-Rows: 300 -> 298
-Rows removed by repair: 2
+Rows: <prepared> -> <repaired>
+Rows removed by repair: <n>
 Label leakage: passed
 Approved features: 8
-Final report: outputs/final_report/final_workflow_report.md
-One-page summary: outputs/final_report/final_workflow_one_page.md
-Session log: outputs/sessions/latest_session.json
+Final report: outputs_real/final_report/final_workflow_report.md
+One-page summary: outputs_real/final_report/final_workflow_one_page.md
+Session log: outputs_real/sessions/latest_session.json
 ```
 
 ### 3.7 可选参数
 
 ```
---input_dir data/sample
---output_root outputs
+--input_dir data/real_market
+--output_root outputs_real
 --analysis_goal "..."
 --no_repair              # 即使 critic failed 也不自动修复
 --max_repair_rounds 3    # Remediation Agent 最大轮数（默认 3）
@@ -147,8 +147,8 @@ python src/agent_shell.py
 ```
 Financial Table Workflow Agent Shell
 Type 'help' to see available commands.
-Current input_dir: data/sample
-Current output_root: outputs
+Current input_dir: data/real_market
+Current output_root: outputs_real
 
 agent>
 ```
@@ -240,7 +240,7 @@ python src/agent_shell.py --demo_commands
 
 - **职责边界**：Stage 7 只优化运行方式和用户交互，不扩大数据来源。
 - **风险隔离**：真实数据源（券商行情、付费 API）涉及合规、稳定性、字段口径差异，需要单独验证，不应混进运行方式优化阶段。
-- **可复现性**：当前用 `generate_sample_data.py` 生成的模拟数据，保证 workflow 逻辑可离线、可复现地验证。
+- **可复现性**：v3 只使用真实市场数据；测试用 `test_data/real_market_sample/` 小型真实 fixture，保证 workflow 逻辑可离线、可复现地验证。
 - **接口已预留**：数据入口通过 `--input_dir` 和 shell 的 `set input_dir` 暴露。将来只要把真实数据转换成 `price.csv` / `volume.csv` / `fundamentals.csv` / `industry.csv` / `calendar.csv` 这 5 张表的格式，就可以直接复用现有 workflow，无需改 Stage 1-6 代码。
 
 ---

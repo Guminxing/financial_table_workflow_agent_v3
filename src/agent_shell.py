@@ -43,7 +43,7 @@ class AgentShell:
 
     用法::
 
-        shell = AgentShell(input_dir="data/sample", output_root="outputs")
+        shell = AgentShell(input_dir="data/real_market", output_root="outputs_real")
         shell.loop()  # 进入交互循环
     """
 
@@ -63,8 +63,8 @@ class AgentShell:
 
     def __init__(
         self,
-        input_dir: str | Path = "data/sample",
-        output_root: str | Path = "outputs",
+        input_dir: str | Path = "data/real_market",
+        output_root: str | Path = "outputs_real",
         analysis_goal: str | None = None,
         auto_repair: bool = True,
     ) -> None:
@@ -614,13 +614,13 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--input_dir",
-        default="data/sample",
-        help="Input data directory (default: data/sample)",
+        default="data/real_market",
+        help="Input data directory (default: data/real_market)",
     )
     p.add_argument(
         "--output_root",
-        default="outputs",
-        help="Output root directory (default: outputs)",
+        default="outputs_real",
+        help="Output root directory (default: outputs_real)",
     )
     p.add_argument(
         "--analysis_goal",

@@ -357,8 +357,8 @@ class RepairLoop:
         loop.load_inputs(...)
         plan = loop.build_repair_plan()
         result = loop.apply_repairs(plan)
-        loop.save_outputs(result, "outputs/repaired")
-        loop.save_report(result, "outputs/repaired")
+        loop.save_outputs(result, "outputs_real/repaired")
+        loop.save_report(result, "outputs_real/repaired")
 
     用法（多轮，由 PipelineRunner 调用）::
 
@@ -945,13 +945,13 @@ class RepairLoop:
         lines.append("")
         lines.append("```bash")
         lines.append(
-            "python src/run_critic.py --panel_path outputs/repaired/repaired_panel.csv "
-            "--data_dictionary_path outputs/prepared/data_dictionary.json "
-            "--execution_log_path outputs/prepared/execution_log.json "
-            "--plan_path outputs/plans/workflow_plan.json "
+            "python src/run_critic.py --panel_path outputs_real/repaired/repaired_panel.csv "
+            "--data_dictionary_path outputs_real/prepared/data_dictionary.json "
+            "--execution_log_path outputs_real/prepared/execution_log.json "
+            "--plan_path outputs_real/plans/workflow_plan.json "
             "--executor_source_path src/executor.py "
-            "--calendar_path data/sample/calendar.csv "
-            "--output_dir outputs/validation_repaired"
+            "--calendar_path data/real_market/calendar.csv "
+            "--output_dir outputs_real/validation_repaired"
         )
         lines.append("```")
         lines.append("")

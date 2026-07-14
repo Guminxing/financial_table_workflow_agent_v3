@@ -62,17 +62,17 @@ class ValidityCritic:
 
         critic = ValidityCritic()
         critic.load_inputs(
-            panel_path="outputs/prepared/prepared_panel.csv",
-            data_dictionary_path="outputs/prepared/data_dictionary.json",
-            execution_log_path="outputs/prepared/execution_log.json",
-            plan_path="outputs/plans/workflow_plan.json",
+            panel_path="outputs_real/prepared/prepared_panel.csv",
+            data_dictionary_path="outputs_real/prepared/data_dictionary.json",
+            execution_log_path="outputs_real/prepared/execution_log.json",
+            plan_path="outputs_real/plans/workflow_plan.json",
             executor_source_path="src/executor.py",
-            calendar_path="data/sample/calendar.csv",
+            calendar_path="data/real_market/calendar.csv",
         )
         report = critic.run_all_checks()
-        critic.save_json_report(report, "outputs/validation/validation_report.json")
-        critic.save_markdown_report(report, "outputs/validation/validation_report.md")
-        critic.save_approved_feature_columns(report, "outputs/validation/approved_feature_columns.json")
+        critic.save_json_report(report, "outputs_real/validation/validation_report.json")
+        critic.save_markdown_report(report, "outputs_real/validation/validation_report.md")
+        critic.save_approved_feature_columns(report, "outputs_real/validation/approved_feature_columns.json")
     """
 
     def __init__(self) -> None:
@@ -746,7 +746,7 @@ class ValidityCritic:
             "Current Critic is a deterministic baseline; no LLM is called.",
             "Judgment on whether rolling fully avoids future data partly relies on static source checks.",
             "No model is trained in this stage.",
-            "No real business data is used; only simulated sample data.",
+            "No real business data is used; only real market data fetched via the adapter.",
             "No investment advice is produced.",
         ]
 

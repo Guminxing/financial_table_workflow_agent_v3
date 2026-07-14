@@ -21,7 +21,7 @@ from typing import Any
 
 import pandas as pd
 
-# ---- 表名常量（与 generate_sample_data 保持一致） -----------------------
+# ---- 表名常量（五张 CSV 固定文件名） -----------------------
 
 T_PRICE = "price.csv"
 T_VOLUME = "volume.csv"
@@ -38,10 +38,10 @@ class CodeExecutor:
     用法::
 
         ex = CodeExecutor()
-        plan = ex.load_workflow_plan("outputs/plans/workflow_plan.json")
-        result = ex.execute(plan, "data/sample")
-        ex.save_outputs(result, "outputs/prepared")
-        ex.save_execution_report(result, "outputs/prepared")
+        plan = ex.load_workflow_plan("outputs_real/plans/workflow_plan.json")
+        result = ex.execute(plan, "data/real_market")
+        ex.save_outputs(result, "outputs_real/prepared")
+        ex.save_execution_report(result, "outputs_real/prepared")
     """
 
     def __init__(self) -> None:

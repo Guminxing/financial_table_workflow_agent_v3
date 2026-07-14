@@ -7,14 +7,14 @@
 
     python src/run_fetch_real_data.py --tickers 600519,000001,300750 \
         --start_date 2024-01-01 --end_date 2024-06-30 \
-        --output_dir data/raw_real \
+        --output_dir data/real_market \
         --tradingagents_path D:\\dwzq\\TradingAgents-astock-main
 
 抓取并直接运行完整流水线::
 
     python src/run_fetch_real_data.py --tickers 600519,000001 \
         --start_date 2024-01-01 --end_date 2024-06-30 \
-        --output_dir data/raw_real \
+        --output_dir data/real_market \
         --tradingagents_path D:\\dwzq\\TradingAgents-astock-main \
         --run_pipeline --output_root outputs_real
 
@@ -73,8 +73,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--output_dir",
-        default="data/raw_real",
-        help="Directory to write the 5 CSVs + fetch_metadata.json (default: data/raw_real).",
+        default="data/real_market",
+        help="Directory to write the 5 CSVs + fetch_metadata.json (default: data/real_market).",
     )
     p.add_argument(
         "--tradingagents_path",

@@ -2,7 +2,7 @@
 
 用法::
 
-    python src/run_executor.py --input_dir data/sample --plan_path outputs/plans/workflow_plan.json --output_dir outputs/prepared
+    python src/run_executor.py --input_dir data/real_market --plan_path outputs_real/plans/workflow_plan.json --output_dir outputs_real/prepared
 
 行为：
 1. 读取 workflow_plan.json 与原始 CSV。
@@ -29,18 +29,18 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run the Code Executor Agent.")
     p.add_argument(
         "--input_dir",
-        default="data/sample",
-        help="Directory containing raw CSV files (default: data/sample)",
+        default="data/real_market",
+        help="Directory containing raw CSV files (default: data/real_market)",
     )
     p.add_argument(
         "--plan_path",
-        default="outputs/plans/workflow_plan.json",
-        help="Path to workflow_plan.json (default: outputs/plans/workflow_plan.json)",
+        default="outputs_real/plans/workflow_plan.json",
+        help="Path to workflow_plan.json (default: outputs_real/plans/workflow_plan.json)",
     )
     p.add_argument(
         "--output_dir",
-        default="outputs/prepared",
-        help="Directory to write prepared outputs (default: outputs/prepared)",
+        default="outputs_real/prepared",
+        help="Directory to write prepared outputs (default: outputs_real/prepared)",
     )
     return p.parse_args()
 
