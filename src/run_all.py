@@ -64,6 +64,19 @@ def parse_args() -> argparse.Namespace:
         help="Do not auto-run the Repair Loop even if the initial Critic fails.",
     )
     p.add_argument(
+        "--max_repair_rounds",
+        type=int,
+        default=3,
+        help="Max remediation rounds for the bounded Repair Loop (default: 3).",
+    )
+    p.add_argument(
+        "--max_row_loss_ratio",
+        type=float,
+        default=0.05,
+        help="Max cumulative deleted rows / original panel rows before manual "
+        "review is required (default: 0.05 = 5%%).",
+    )
+    p.add_argument(
         "--skip_report",
         action="store_true",
         help="Skip the Final Report Generator stage.",
@@ -90,8 +103,58 @@ def _clean_outputs(output_root: Path) -> None:
         shutil.rmtree(output_root)
 
 
+def _validate_remediation_args(args: argparse.Namespace) -> None:
+    """尽早校验 Remediation Agent 参数边界，避免到 Stage 6 才因产物缺失失败。"""
+    if args.max_repair_rounds < 1:
+        raise SystemExit(
+            f"[run_all] --max_repair_rounds must be >= 1, got {args.max_repair_rounds}"
+        )
+    if not (0.0 <= args.max_row_loss_ratio <= 1.0):
+        raise SystemExit(
+            f"[run_all] --max_row_loss_ratio must be in [0, 1], got {args.max_row_loss_ratio}"
+        )
+
+
+def _compute_exit_code(runner: PipelineRunner) -> int:
+    """计算退出码。
+
+    - 0：最终 validation 为 passed / passed_with_warnings，且不需要人工处理。
+    - 1：阶段异常或必要产物失败（任一 stage status=failed）。
+    - 2：流水线正常执行，但最终 failed、blocked 或 manual_review_required。
+    """
+    failed_stages = [
+        s for s, rec in runner.stages.items() if rec["status"] == "failed"
+    ]
+    if failed_stages:
+        print(
+            f"[run_all] pipeline completed with failed stages: {failed_stages}",
+            file=sys.stderr,
+        )
+        return 1
+
+    status = runner.get_status()
+    final_status = status.get("final_validation_status")
+    manual_review = bool(status.get("manual_review_required"))
+    term = status.get("termination_reason")
+    unresolved = bool(status.get("unresolved_checks"))
+
+    # 最终 failed，或需要人工处理，或仍有未解决检查项 → 2
+    if final_status == "failed" or manual_review or unresolved:
+        print(
+            f"[run_all] pipeline ran but did not complete auto-remediation: "
+            f"final_status={final_status}, termination_reason={term}, "
+            f"manual_review_required={manual_review}, "
+            f"unresolved_checks={status.get('unresolved_checks')}",
+            file=sys.stderr,
+        )
+        return 2
+
+    return 0
+
+
 def main() -> int:
     args = parse_args()
+    _validate_remediation_args(args)
     input_dir = Path(args.input_dir)
     output_root = Path(args.output_root)
 
@@ -105,6 +168,8 @@ def main() -> int:
         auto_repair=not args.no_repair,
         skip_report=args.skip_report,
         verbose=args.verbose,
+        max_repair_rounds=args.max_repair_rounds,
+        max_row_loss_ratio=args.max_row_loss_ratio,
     )
 
     runner.run_full_pipeline()
@@ -114,17 +179,7 @@ def main() -> int:
     print()
     print(f"[run_all] session log saved: {session_log}")
 
-    # 退出码：任一阶段 failed 则返回 1
-    failed = [
-        s for s, rec in runner.stages.items() if rec["status"] == "failed"
-    ]
-    if failed:
-        print(
-            f"[run_all] pipeline completed with failed stages: {failed}",
-            file=sys.stderr,
-        )
-        return 1
-    return 0
+    return _compute_exit_code(runner)
 
 
 if __name__ == "__main__":

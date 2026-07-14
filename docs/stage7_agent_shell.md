@@ -69,17 +69,29 @@ outputs/sessions/latest_session.json + session_YYYYMMDD_HHMMSS.json
 ### 3.3 auto_repair 逻辑
 
 - 运行 initial critic 后读取 `overall_status`。
-- 若 `failed` 且 `auto_repair=True`：自动运行 Repair Loop + repaired critic。
-- 若 `passed` / `passed_with_warnings`：跳过 repair 与 repaired critic，在 log 里标记 `skipped` 并写明原因。
-- 若 `--no_repair`：即使 failed 也跳过 repair（标记 skipped）。
+- 若 `failed` 且 `auto_repair=True`：自动运行 **有界多轮 Remediation Agent**
+  （Observe → Decide → Act → Reflect，`max_repair_rounds` 默认 3）+ repaired critic。
+- 若 `passed` / `passed_with_warnings`：跳过 repair 与 repaired critic，在 log 里标记
+  `skipped` 并写明原因；仍写 `repair_history.json`（0 轮，`termination_reason=validation_passed`）。
+- 若 `--no_repair`：即使 failed 也跳过 repair（标记 skipped，`termination_reason=repair_disabled`）。
 
-### 3.4 session log
+### 3.4 Remediation Agent 状态字段（v2）
+
+`get_status()` / `status` / `show summary` 新增展示：
+
+- `repair_rounds`：实际运行的轮数
+- `termination_reason`：`validation_passed` / `no_actionable_strategy` / `no_progress` /
+  `max_rounds_reached` / `manual_review_required` / `stage_failed` / `repair_disabled`
+- `unresolved_checks`：未能自动修复的 failed check 名
+- `manual_review_required`：是否需要人工介入
+
+### 3.5 session log
 
 - 每次 `run_full_pipeline` 后生成 `outputs/sessions/latest_session.json`（覆盖，便于 shell 读取最新状态）。
 - 同时生成带时间戳的 `outputs/sessions/session_YYYYMMDD_HHMMSS.json`（保留历史）。
 - 失败不静默吞掉：`error_message` + traceback 写入 session log，终端也明确报错。
 
-### 3.5 run_all.py 终端输出（summary dashboard）
+### 3.6 run_all.py 终端输出（summary dashboard）
 
 ```
 [run_all] Financial Table Workflow Agent
@@ -106,16 +118,18 @@ One-page summary: outputs/final_report/final_workflow_one_page.md
 Session log: outputs/sessions/latest_session.json
 ```
 
-### 3.6 可选参数
+### 3.7 可选参数
 
 ```
 --input_dir data/sample
 --output_root outputs
 --analysis_goal "..."
---no_repair          # 即使 critic failed 也不自动修复
---skip_report       # 跳过 Final Report Generator
---clean_outputs     # 运行前清空 output_root
---verbose           # 打印详细进度与 traceback
+--no_repair              # 即使 critic failed 也不自动修复
+--max_repair_rounds 3    # Remediation Agent 最大轮数（默认 3）
+--max_row_loss_ratio 0.05  # 累计删行 / 原始行数 上限（默认 5%），超过转人工
+--skip_report           # 跳过 Final Report Generator
+--clean_outputs         # 运行前清空 output_root
+--verbose               # 打印详细进度与 traceback
 ```
 
 ---
@@ -202,7 +216,10 @@ python src/agent_shell.py --demo_commands
 
 1. **统一调度**：PipelineRunner 把 7 个阶段封装成一个可编程对象，阶段依赖、auto_repair、skip 逻辑都在调度器里，用户不用记顺序。
 2. **状态自省**：`get_status()` / `status` 命令随时给出"跑到哪一步、哪一步失败、最终 status"的快照，而不是让用户去翻文件。
-3. **反馈驱动**：initial critic failed → 自动 repair → 自动 recritic，这是 agent 的"根据反馈自我修正"，不是"报错就停"。
+3. **反馈驱动**：initial critic failed → 自动 Remediation Agent（有界多轮
+   Observe → Decide → Act → Reflect）→ 自动 recritic，这是 agent 的"根据
+   反馈自我修正"，不是"报错就停"。`max_repair_rounds` + `no_progress` +
+   安全门保证不会无限循环。
 4. **交互式意图理解**：shell 接受模糊命令（`full run`、`summary`、`failures`），给出自然语言反馈和下一步建议，像在和用户对话。
 5. **可审计**：每次运行生成 session log（latest + timestamped），记录每阶段 status/duration/error，整个运行过程可追溯。
 

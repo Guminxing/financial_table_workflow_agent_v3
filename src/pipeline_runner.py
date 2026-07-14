@@ -36,10 +36,10 @@ from executor import CodeExecutor  # noqa: E402
 from generate_sample_data import generate_sample_data  # noqa: E402
 from planner import DEFAULT_ANALYSIS_GOAL, WorkflowPlanner  # noqa: E402
 from profiler import FinancialTableProfiler  # noqa: E402
-from repair import RepairLoop  # noqa: E402
+from repair import REPAIR_VERSION, RepairLoop  # noqa: E402
 from report_generator import ReportGenerator  # noqa: E402
 
-RUNNER_VERSION = "0.1"
+RUNNER_VERSION = "0.2"
 
 # 阶段顺序与展示名
 STAGE_ORDER = [
@@ -61,6 +61,14 @@ STAGE_DISPLAY = {
     "repaired_critic": "Stage 6 Re-run Critic",
     "final_report": "Stage 7 Final Report",
 }
+
+# Remediation Agent 默认参数
+DEFAULT_MAX_REPAIR_ROUNDS = 3
+DEFAULT_MAX_ROW_LOSS_RATIO = 0.05
+
+
+# 可注入的 Critic 工厂类型（测试用）；签名 () -> ValidityCritic-like 对象
+CriticFactory = Any
 
 
 class PipelineRunner:
@@ -87,6 +95,8 @@ class PipelineRunner:
         auto_repair: bool = True,
         skip_report: bool = False,
         verbose: bool = False,
+        max_repair_rounds: int = DEFAULT_MAX_REPAIR_ROUNDS,
+        max_row_loss_ratio: float = DEFAULT_MAX_ROW_LOSS_RATIO,
     ) -> None:
         self.input_dir = Path(input_dir)
         self.output_root = Path(output_root)
@@ -94,6 +104,20 @@ class PipelineRunner:
         self.auto_repair = auto_repair
         self.skip_report = skip_report
         self.verbose = verbose
+        self.max_repair_rounds = int(max_repair_rounds)
+        self.max_row_loss_ratio = float(max_row_loss_ratio)
+
+        # Remediation Agent 运行结果（多轮闭环）。
+        # 内存字段标记"本次运行是否已产生状态"；get_status 时若内存无状态且
+        # repair_history.json 存在，则从磁盘恢复历史状态（见 _load_repair_state）。
+        self.repair_history: list[dict[str, Any]] = []
+        self.repair_rounds_run: int | None = None
+        self.termination_reason: str | None = None
+        self.manual_review_required: bool | None = None
+        self.unresolved_checks: list[str] | None = None
+        self._has_run_remediation: bool = False
+        # 可注入的 Critic 工厂（测试用）；为 None 时用真实 ValidityCritic。
+        self._critic_factory: CriticFactory | None = None
 
         # 各阶段输出目录（与前六阶段默认保持一致）
         self.profiles_dir = self.output_root / "profiles"
@@ -121,6 +145,7 @@ class PipelineRunner:
         self.repaired_panel = self.repaired_dir / "repaired_panel.csv"
         self.repair_log = self.repaired_dir / "repair_log.json"
         self.repair_report = self.repaired_dir / "repair_report.md"
+        self.repair_history_json = self.repaired_dir / "repair_history.json"
         self.final_validation_json = (
             self.validation_repaired_dir / "validation_report.json"
         )
@@ -222,11 +247,12 @@ class PipelineRunner:
 
         # 5. repair（仅当 initial critic failed 且 auto_repair=True）
         if initial_status == "failed" and self.auto_repair:
-            self.run_repair()
+            # v2：有界多轮 Remediation Agent（Observe → Decide → Act → Reflect）
+            self._run_remediation_agent()
             if self.stages["repair"]["status"] == "failed":
                 self._fail_fast("repair")
                 return self.get_status()
-            # 6. repaired critic
+            # 6. repaired critic（最后一轮已在内层跑过，这里补一次正式阶段记录）
             self.run_repaired_critic()
             if self.stages["repaired_critic"]["status"] == "failed":
                 self._fail_fast("repaired_critic")
@@ -245,6 +271,26 @@ class PipelineRunner:
                 "repaired_critic", reason="repair skipped; no re-critic needed"
             )
             self._write_noop_repair_artifacts(initial_status, no_op_kind)
+            # no-op 场景也写 repair_history.json（0 轮），保证审计文件始终存在
+            self.repair_rounds_run = 0
+            if no_op_kind == "repair_disabled":
+                # initial critic failed 但 --no_repair：最终仍 failed，
+                # unresolved_checks 记录初始 failed check 名，manual_review_required=True
+                self.termination_reason = "repair_disabled"
+                init_failed = self._read_failed_check_names(self.initial_validation_json)
+                self.unresolved_checks = init_failed
+                self.manual_review_required = bool(init_failed)
+            else:
+                self.termination_reason = "validation_passed"
+                self.manual_review_required = False
+                self.unresolved_checks = []
+            self._has_run_remediation = True
+            self._write_repair_history(
+                rounds=[],
+                termination_reason=self.termination_reason,
+                manual_review_required=bool(self.manual_review_required),
+                unresolved_checks=list(self.unresolved_checks),
+            )
 
         # 7. final report
         if not self.skip_report:
@@ -272,6 +318,10 @@ class PipelineRunner:
 
         approved, label_col, label_in_features = self._read_approved_features()
 
+        # Remediation Agent 状态：本次运行内存状态优先；若本次未运行且
+        # repair_history.json 存在，则从磁盘恢复历史状态。
+        rounds, term, manual, unresolved = self._resolve_repair_state()
+
         return {
             "project": "financial_table_workflow_agent",
             "runner_version": RUNNER_VERSION,
@@ -295,6 +345,10 @@ class PipelineRunner:
             "approved_feature_columns": approved,
             "label_column": label_col,
             "label_in_approved_features": label_in_features,
+            "repair_rounds": rounds,
+            "termination_reason": term,
+            "manual_review_required": manual,
+            "unresolved_checks": unresolved,
             "final_report_path": (
                 str(self.full_report_md).replace("\\", "/")
                 if self.full_report_md.exists()
@@ -309,6 +363,44 @@ class PipelineRunner:
                 str(self.sessions_dir / "latest_session.json").replace("\\", "/")
             ),
         }
+
+    def _resolve_repair_state(
+        self,
+    ) -> tuple[int | None, str | None, bool | None, list[str]]:
+        """返回 (repair_rounds, termination_reason, manual_review_required, unresolved_checks)。
+
+        优先级：本次运行内存状态 > repair_history.json 磁盘历史 > 默认空值。
+        """
+        if self._has_run_remediation:
+            return (
+                self.repair_rounds_run,
+                self.termination_reason,
+                self.manual_review_required,
+                list(self.unresolved_checks or []),
+            )
+        # 本次未运行：尝试从磁盘恢复
+        disk = self._load_repair_state_from_disk()
+        if disk is not None:
+            return disk
+        return (0, None, False, [])
+
+    def _load_repair_state_from_disk(
+        self,
+    ) -> tuple[int, str, bool, list[str]] | None:
+        """从 repair_history.json 读取历史 Remediation Agent 状态。"""
+        if not self.repair_history_json.exists():
+            return None
+        try:
+            with self.repair_history_json.open("r", encoding="utf-8") as f:
+                rh = json.load(f)
+            return (
+                int(rh.get("repair_rounds", 0)),
+                rh.get("termination_reason"),
+                bool(rh.get("manual_review_required", False)),
+                list(rh.get("unresolved_checks", [])),
+            )
+        except Exception:  # noqa: BLE001
+            return None
 
     def save_session_log(self) -> Path:
         """保存 session log：latest_session.json + session_YYYYMMDD_HHMMSS.json。"""
@@ -503,7 +595,11 @@ class PipelineRunner:
         }
 
     def _repair_impl(self) -> dict[str, Any]:
-        """Stage 5 实现：Repair Loop。"""
+        """Stage 5 实现：Repair Loop（单轮，向后兼容 run_repair CLI 与旧测试）。
+
+        v2 的多轮调度走 :meth:`_run_remediation_agent`；本方法保留单轮入口，
+        供 ``run repair`` shell 命令与 ``run_repair.py`` CLI 复用。
+        """
         for label, path in [
             ("panel", self.prepared_panel),
             ("validation_report", self.initial_validation_json),
@@ -513,7 +609,7 @@ class PipelineRunner:
             if not Path(path).exists():
                 raise FileNotFoundError(f"{label} not found: {path}")
 
-        loop = RepairLoop()
+        loop = RepairLoop(max_row_loss_ratio=self.max_row_loss_ratio)
         loop.load_inputs(
             panel_path=self.prepared_panel,
             validation_report_path=self.initial_validation_json,
@@ -536,6 +632,561 @@ class PipelineRunner:
                 "input_validation_status": log.get("input_validation_status"),
             },
         }
+
+    # ------------------------------------------------------------------
+    # v2：有界多轮 Remediation Agent（Observe → Decide → Act → Reflect）
+    # ------------------------------------------------------------------
+
+    def _run_remediation_agent(self) -> None:
+        """有界多轮自我修正闭环。
+
+        每一轮：
+          Observe  读取最新 validation_report（首轮用 initial，后续用上一轮复审）
+          Decide   用 RepairLoop.decide_round 选可执行策略或给出 termination_reason
+          Act      在 panel 副本上 apply_selected；安全门在实际行数上复核
+          Reflect  重新运行 Critic；记录 panel 指纹与 failed check 集合
+          Decide whether to continue
+
+        停止条件（termination_reason）：
+          validation_passed / no_actionable_strategy / no_progress /
+          max_rounds_reached / manual_review_required / stage_failed
+
+        下一轮基于上一轮 repaired panel 与最新 Critic 结果，绝不重用最初输入。
+        """
+        rec = self.stages["repair"]
+        rec["status"] = "running"
+        rec["start_time"] = _now_iso()
+        start_dt = datetime.now()
+        self._log(
+            f"Remediation Agent start (max_rounds={self.max_repair_rounds}, "
+            f"max_row_loss_ratio={self.max_row_loss_ratio})"
+        )
+
+        try:
+            self._remediation_agent_loop()
+            self._has_run_remediation = True
+            end_dt = datetime.now()
+            rec["end_time"] = _now_iso()
+            rec["duration_seconds"] = round((end_dt - start_dt).total_seconds(), 3)
+            rec["status"] = "completed"
+            rec["summary"] = {
+                "repair_rounds": self.repair_rounds_run,
+                "termination_reason": self.termination_reason,
+                "manual_review_required": self.manual_review_required,
+                "unresolved_checks": list(self.unresolved_checks or []),
+            }
+            rec["error_message"] = None
+            self._log(
+                f"Remediation Agent finished: rounds={self.repair_rounds_run}, "
+                f"termination_reason={self.termination_reason}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            end_dt = datetime.now()
+            rec["end_time"] = _now_iso()
+            rec["duration_seconds"] = round((end_dt - start_dt).total_seconds(), 3)
+            rec["status"] = "failed"
+            rec["error_message"] = f"{type(exc).__name__}: {exc}"
+            rec["traceback"] = traceback.format_exc()
+            self.termination_reason = "stage_failed"
+            self.manual_review_required = True
+            self._has_run_remediation = True
+            # 即使失败也写 repair_history.json，保证审计文件存在
+            self._write_repair_history(
+                rounds=self.repair_history,
+                termination_reason=self.termination_reason,
+                manual_review_required=True,
+                unresolved_checks=list(self.unresolved_checks or []),
+            )
+            print(
+                f"[pipeline] ERROR in Remediation Agent: "
+                f"{type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            if self.verbose:
+                traceback.print_exc()
+
+    def _remediation_agent_loop(self) -> None:
+        """Remediation Agent 主循环（不含异常捕获，由外层 _run_remediation_agent 包裹）。"""
+        # 参数边界校验（防御性；run_all 已校验，这里再兜底）
+        if self.max_repair_rounds < 1:
+            raise ValueError(
+                f"max_repair_rounds must be >= 1, got {self.max_repair_rounds}"
+            )
+        if not (0.0 <= self.max_row_loss_ratio <= 1.0):
+            raise ValueError(
+                f"max_row_loss_ratio must be in [0, 1], got {self.max_row_loss_ratio}"
+            )
+
+        # 输入校验
+        for label, path in [
+            ("panel", self.prepared_panel),
+            ("validation_report", self.initial_validation_json),
+            ("data_dictionary", self.data_dictionary),
+            ("approved_features", self.initial_approved),
+        ]:
+            if not Path(path).exists():
+                raise FileNotFoundError(f"{label} not found: {path}")
+
+        loop = RepairLoop(max_row_loss_ratio=self.max_row_loss_ratio)
+        loop.load_inputs(
+            panel_path=self.prepared_panel,
+            validation_report_path=self.initial_validation_json,
+            data_dictionary_path=self.data_dictionary,
+            approved_features_path=self.initial_approved,
+        )
+
+        # 原始 panel 行数（安全门基准，全程不变）
+        rows_original = len(loop.panel) if loop.panel is not None else 0
+        if rows_original == 0:
+            # 空 panel：无法修复，直接 manual review
+            self.termination_reason = "manual_review_required"
+            self.manual_review_required = True
+            self.unresolved_checks = ["empty_panel"]
+            self._write_noop_repair_artifacts("failed", "no_repair_needed")
+            self._write_repair_history(
+                rounds=[],
+                termination_reason=self.termination_reason,
+                manual_review_required=True,
+                unresolved_checks=["empty_panel"],
+            )
+            return
+
+        # 当前 panel（每轮更新；首轮为 prepared_panel）
+        current_panel = loop.panel.copy()
+        # 当前 validation report（每轮更新；首轮为 initial）
+        with self.initial_validation_json.open("r", encoding="utf-8") as f:
+            current_report = json.load(f)
+
+        cumulative_removed = 0
+        prev_failed_set: set[str] | None = None
+        prev_fingerprint: str | None = None
+        rounds_log: list[dict[str, Any]] = []
+
+        for round_idx in range(1, self.max_repair_rounds + 1):
+            # ---- Observe ----
+            failed_before = loop.failed_checks_of(current_report)
+            failed_names_before = sorted(c["check_name"] for c in failed_before)
+            status_before = current_report.get("overall_status", "unknown")
+            rows_before = len(current_panel)
+            fingerprint_before = loop.panel_fingerprint(current_panel)
+
+            # ---- Decide ----
+            decision = loop.decide_round(
+                current_report,
+                current_panel,
+                rows_original,
+                cumulative_removed=cumulative_removed,
+            )
+            term = decision["termination_reason"]
+
+            # 若 Decide 已给出终止原因（validation_passed / no_actionable_strategy /
+            # manual_review_required），记录本轮并退出
+            if term is not None:
+                round_rec = self._make_round_record(
+                    round_idx,
+                    status_before,
+                    failed_names_before,
+                    decision["candidate_strategies"],
+                    decision["selected_strategies"],
+                    decision["decision_reason"],
+                    rows_before,
+                    rows_before,
+                    cumulative_removed,
+                    rows_original,
+                    status_before,
+                    failed_names_before,
+                    fingerprint_before,
+                    term,
+                )
+                rounds_log.append(round_rec)
+                self.termination_reason = term
+                self.manual_review_required = bool(
+                    decision.get("manual_review_required", False)
+                )
+                self.unresolved_checks = list(decision.get("unresolved_checks", []))
+                # validation_passed 时把当前 panel 落盘为 repaired_panel
+                if term == "validation_passed":
+                    self._save_repaired_panel(current_panel, loop)
+                    self._copy_current_validation_as_repaired(current_report)
+                else:
+                    # no_actionable_strategy / manual_review_required：
+                    # 仍把当前 panel 落盘，便于人工查看
+                    self._save_repaired_panel(current_panel, loop)
+                    # 复审报告用当前 report（可能仍 failed）
+                    self._copy_current_validation_as_repaired(current_report)
+                break
+
+            # ---- Act ----
+            new_panel, actions, round_removed = loop.apply_selected(
+                current_panel, decision["selected_strategies"]
+            )
+            rows_after = len(new_panel)
+
+            # 安全门：在实际执行结果上复核累计删除比例
+            actual_cumulative = cumulative_removed + round_removed
+            if rows_original > 0:
+                actual_ratio = actual_cumulative / rows_original
+            else:
+                actual_ratio = 0.0
+            safety_violation = actual_ratio > self.max_row_loss_ratio + 1e-9
+
+            if safety_violation:
+                # 超过阈值：不保存修复后 panel，回退到本轮输入，转人工
+                self._save_repaired_panel(current_panel, loop)
+                self._copy_current_validation_as_repaired(current_report)
+                round_rec = self._make_round_record(
+                    round_idx,
+                    status_before,
+                    failed_names_before,
+                    decision["candidate_strategies"],
+                    decision["selected_strategies"],
+                    (
+                        f"safety gate violated after apply: actual cumulative row loss "
+                        f"{actual_ratio:.4f} > {self.max_row_loss_ratio:.4f}; "
+                        "panel reverted to pre-round state; manual review required"
+                    ),
+                    rows_before,
+                    rows_before,
+                    cumulative_removed,
+                    rows_original,
+                    status_before,
+                    failed_names_before,
+                    fingerprint_before,
+                    "manual_review_required",
+                )
+                rounds_log.append(round_rec)
+                self.termination_reason = "manual_review_required"
+                self.manual_review_required = True
+                self.unresolved_checks = list(failed_names_before)
+                break
+
+            # ---- Reflect：对修复后 panel 重新运行 Critic ----
+            current_panel = new_panel
+            cumulative_removed = actual_cumulative
+            # 先把修复后 panel 落盘，Critic 从磁盘读
+            self._save_repaired_panel(current_panel, loop)
+            reflect_report = self._run_critic(
+                panel_path=self.repaired_panel,
+                output_dir=self.validation_repaired_dir,
+                critic_factory=self._critic_factory,
+            )
+            current_report = reflect_report
+            status_after = reflect_report.get("overall_status", "unknown")
+            failed_after = loop.failed_checks_of(reflect_report)
+            failed_names_after = sorted(c["check_name"] for c in failed_after)
+            fingerprint_after = loop.panel_fingerprint(current_panel)
+
+            round_rec = self._make_round_record(
+                round_idx,
+                status_before,
+                failed_names_before,
+                decision["candidate_strategies"],
+                decision["selected_strategies"],
+                decision["decision_reason"],
+                rows_before,
+                rows_after,
+                cumulative_removed,
+                rows_original,
+                status_after,
+                failed_names_after,
+                fingerprint_after,
+                None,
+            )
+            round_rec["actions_applied"] = actions
+            rounds_log.append(round_rec)
+
+            # ---- Decide whether to continue ----
+            if status_after != "failed" and not failed_names_after:
+                self.termination_reason = "validation_passed"
+                self.manual_review_required = False
+                self.unresolved_checks = []
+                break
+
+            # no_progress：failed check 集合 + panel 指纹连续不变 → 停止。
+            # 注意：必须同时满足"failed 集合不变"且"指纹不变"才停；只要其中
+            # 一个变化就视为有进展，继续下一轮（直到 max_rounds）。
+            if (
+                prev_failed_set is not None
+                and prev_failed_set == set(failed_names_after)
+                and prev_fingerprint == fingerprint_after
+            ):
+                self.termination_reason = "no_progress"
+                self.manual_review_required = True
+                self.unresolved_checks = list(failed_names_after)
+                break
+
+            prev_failed_set = set(failed_names_after)
+            prev_fingerprint = fingerprint_after
+
+            # 达到最大轮数
+            if round_idx >= self.max_repair_rounds:
+                self.termination_reason = "max_rounds_reached"
+                self.manual_review_required = bool(failed_names_after)
+                self.unresolved_checks = list(failed_names_after)
+                break
+
+        self.repair_rounds_run = len(rounds_log)
+        self.repair_history = rounds_log
+        # 写 repair_plan / repair_log / repair_report（兼容旧产物）
+        self._write_remediation_legacy_artifacts(loop, current_panel, current_report)
+        # 写 repair_history.json（v2 审计记录）
+        self._write_repair_history(
+            rounds=rounds_log,
+            termination_reason=self.termination_reason or "max_rounds_reached",
+            manual_review_required=bool(self.manual_review_required),
+            unresolved_checks=list(self.unresolved_checks or []),
+        )
+
+    # ------------------------------------------------------------------
+    # Remediation Agent 辅助
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_round_record(
+        round_idx: int,
+        status_before: str,
+        failed_before: list[str],
+        candidates: list[dict[str, Any]],
+        selected: list[dict[str, Any]],
+        decision_reason: str,
+        rows_before: int,
+        rows_after: int,
+        cumulative_removed: int,
+        rows_original: int,
+        status_after: str,
+        failed_after: list[str],
+        fingerprint: str,
+        termination_reason: str | None,
+    ) -> dict[str, Any]:
+        cum_ratio = (
+            round(cumulative_removed / rows_original, 6) if rows_original > 0 else 0.0
+        )
+        return {
+            "round": round_idx,
+            "validation_status_before": status_before,
+            "failed_checks_before": failed_before,
+            "candidate_strategies": candidates,
+            "selected_strategies": selected,
+            "decision_reason": decision_reason,
+            "rows_before": rows_before,
+            "rows_after": rows_after,
+            "cumulative_row_loss_ratio": cum_ratio,
+            "validation_status_after": status_after,
+            "failed_checks_after": failed_after,
+            "panel_fingerprint": fingerprint,
+            "termination_reason": termination_reason,
+        }
+
+    def _save_repaired_panel(self, panel: pd.DataFrame, loop: RepairLoop) -> None:
+        """把当前 panel 落盘为 repaired_panel.csv（不覆盖原始 prepared_panel.csv）。"""
+        self.repaired_dir.mkdir(parents=True, exist_ok=True)
+        panel_to_write = panel.copy()
+        if "date" in panel_to_write.columns:
+            panel_to_write["date"] = pd.to_datetime(
+                panel_to_write["date"]
+            ).dt.strftime("%Y-%m-%d")
+        if "announce_date" in panel_to_write.columns:
+            ad = pd.to_datetime(panel_to_write["announce_date"], errors="coerce")
+            panel_to_write["announce_date"] = ad.dt.strftime("%Y-%m-%d")
+        panel_to_write.to_csv(
+            self.repaired_panel, index=False, encoding="utf-8-sig"
+        )
+
+    def _copy_current_validation_as_repaired(self, report: dict[str, Any]) -> None:
+        """把当前 validation report 写为复审报告（validation_repaired/）。"""
+        self.validation_repaired_dir.mkdir(parents=True, exist_ok=True)
+        critic = ValidityCritic()
+        critic.save_json_report(report, self.final_validation_json)
+        critic.save_markdown_report(report, self.final_validation_md)
+        critic.save_approved_feature_columns(report, self.final_approved)
+
+    def _write_remediation_legacy_artifacts(
+        self,
+        loop: RepairLoop,
+        final_panel: pd.DataFrame,
+        final_report: dict[str, Any],
+    ) -> None:
+        """写 repair_plan.json / repair_log.json / repair_report.md（兼容旧产物）。"""
+        self.repaired_dir.mkdir(parents=True, exist_ok=True)
+        rows_before = len(loop.panel) if loop.panel is not None else 0
+        rows_after = len(final_panel)
+        failed_checks = loop.failed_checks_of(final_report)
+        # repair_plan：用最后一轮的 failed check 与已应用策略汇总
+        applied_strategies = []
+        for r in self.repair_history:
+            for a in r.get("actions_applied", []):
+                applied_strategies.append(a)
+        repair_plan = {
+            "project": "financial_table_workflow_agent",
+            "repair_version": REPAIR_VERSION,
+            "input_validation_status": loop.validation_report.get(
+                "overall_status", "unknown"
+            ),
+            "failed_checks": failed_checks,
+            "warning_checks": [
+                {
+                    "check_name": c["check_name"],
+                    "status": c.get("status"),
+                    "evidence": c.get("evidence"),
+                }
+                for c in final_report.get("checks", [])
+                if c.get("status") == "warning"
+            ],
+            "repair_actions": applied_strategies,
+            "not_repaired_items": [
+                {"item": name, "reason": "unresolved after bounded remediation; manual review required"}
+                for name in (self.unresolved_checks or [])
+            ],
+            "next_validation_required": self.termination_reason != "validation_passed",
+            "remediation_summary": {
+                "repair_rounds": self.repair_rounds_run,
+                "termination_reason": self.termination_reason,
+                "manual_review_required": bool(self.manual_review_required),
+                "unresolved_checks": list(self.unresolved_checks or []),
+            },
+        }
+        with self.repair_plan.open("w", encoding="utf-8") as f:
+            json.dump(repair_plan, f, ensure_ascii=False, indent=2)
+
+        checks_after = loop._post_repair_checks(final_panel)
+        repair_log = {
+            "project": "financial_table_workflow_agent",
+            "repair_version": REPAIR_VERSION,
+            "input_panel_path": str(self.prepared_panel).replace("\\", "/"),
+            "input_validation_report_path": str(self.initial_validation_json).replace("\\", "/"),
+            "rows_before": rows_before,
+            "rows_after": rows_after,
+            "rows_removed": rows_before - rows_after,
+            "actions_applied": applied_strategies,
+            "checks_after_repair": checks_after,
+            "warnings": [],
+            "next_step": (
+                "validation_passed" if self.termination_reason == "validation_passed"
+                else "manual review required"
+            ),
+            "remediation_summary": {
+                "repair_rounds": self.repair_rounds_run,
+                "termination_reason": self.termination_reason,
+                "manual_review_required": bool(self.manual_review_required),
+                "unresolved_checks": list(self.unresolved_checks or []),
+            },
+        }
+        with self.repair_log.open("w", encoding="utf-8") as f:
+            json.dump(repair_log, f, ensure_ascii=False, indent=2)
+
+        # repair_report.md
+        self.repair_report.write_text(
+            self._render_remediation_report(
+                rows_before, rows_after, final_report, applied_strategies
+            ),
+            encoding="utf-8",
+        )
+
+    def _render_remediation_report(
+        self,
+        rows_before: int,
+        rows_after: int,
+        final_report: dict[str, Any],
+        applied_strategies: list[dict[str, Any]],
+    ) -> str:
+        lines: list[str] = []
+        lines.append("# Remediation Agent Report (bounded multi-round)")
+        lines.append("")
+        lines.append(
+            f"- project: `financial_table_workflow_agent`  |  repair_version: `{REPAIR_VERSION}`"
+        )
+        lines.append(f"- repair_rounds: {self.repair_rounds_run}")
+        lines.append(f"- termination_reason: `{self.termination_reason}`")
+        lines.append(
+            f"- manual_review_required: {bool(self.manual_review_required)}"
+        )
+        lines.append(
+            f"- unresolved_checks: {list(self.unresolved_checks or [])}"
+        )
+        lines.append("")
+        lines.append("## 1. Loop Model")
+        lines.append("")
+        lines.append(
+            "Observe validation report → Decide actionable strategy → Safety check → "
+            "Apply repair → Re-run Critic → Reflect → Decide whether to continue."
+        )
+        lines.append("")
+        lines.append(
+            "This is a **bounded feedback loop**, not infinite retry, and not a model "
+            "directly editing financial data. Each round is based on the previous round's "
+            "repaired panel and the latest Critic result."
+        )
+        lines.append("")
+        lines.append("## 2. Round History")
+        lines.append("")
+        lines.append("| round | status_before | rows_before | rows_after | cum_loss | status_after | termination |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for r in self.repair_history:
+            lines.append(
+                f"| {r['round']} | {r['validation_status_before']} | "
+                f"{r['rows_before']} | {r['rows_after']} | "
+                f"{r['cumulative_row_loss_ratio']:.4f} | "
+                f"{r['validation_status_after']} | "
+                f"{r['termination_reason'] or '-'} |"
+            )
+        lines.append("")
+        lines.append("## 3. Strategies Applied")
+        lines.append("")
+        if applied_strategies:
+            lines.append("| strategy | target_check | rows_removed | status |")
+            lines.append("|---|---|---|---|")
+            for a in applied_strategies:
+                lines.append(
+                    f"| {a.get('strategy')} | {a.get('target_check')} | "
+                    f"{a.get('rows_removed')} | {a.get('status')} |"
+                )
+        else:
+            lines.append("(none)")
+        lines.append("")
+        lines.append("## 4. Result")
+        lines.append("")
+        lines.append(f"- rows before: {rows_before}")
+        lines.append(f"- rows after: {rows_after}")
+        lines.append(f"- rows removed: {rows_before - rows_after}")
+        lines.append(
+            f"- final validation status: {final_report.get('overall_status', 'unknown')}"
+        )
+        lines.append("")
+        lines.append("## 5. Safety Gates")
+        lines.append("")
+        lines.append(
+            f"- max_row_loss_ratio: {self.max_row_loss_ratio} "
+            "(cumulative deleted rows / original panel rows)"
+        )
+        lines.append("- announce_date is never fabricated or backfilled.")
+        lines.append("- label_next_5d role is never changed; it never enters approved_feature_columns.")
+        lines.append("- No LLM, dynamic code, or arbitrary shell command modifies the DataFrame.")
+        lines.append("- Original CSVs are never overwritten; only derived artifacts are produced.")
+        lines.append("")
+        return "\n".join(lines)
+
+    def _write_repair_history(
+        self,
+        rounds: list[dict[str, Any]],
+        termination_reason: str,
+        manual_review_required: bool,
+        unresolved_checks: list[str],
+    ) -> None:
+        """写 outputs/repaired/repair_history.json（v2 审计记录）。"""
+        self.repaired_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "project": "financial_table_workflow_agent",
+            "repair_version": REPAIR_VERSION,
+            "max_repair_rounds": self.max_repair_rounds,
+            "max_row_loss_ratio": self.max_row_loss_ratio,
+            "repair_rounds": len(rounds),
+            "termination_reason": termination_reason,
+            "manual_review_required": manual_review_required,
+            "unresolved_checks": unresolved_checks,
+            "rounds": rounds,
+        }
+        with self.repair_history_json.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
 
     def _repaired_critic_impl(self) -> dict[str, Any]:
         """Stage 6 实现：对 repaired_panel 重新运行 Critic。"""
@@ -621,10 +1272,16 @@ class PipelineRunner:
         self,
         panel_path: Path,
         output_dir: Path,
+        critic_factory: "CriticFactory | None" = None,
     ) -> dict[str, Any]:
-        """对指定 panel 运行 Critic，输出到 output_dir。"""
+        """对指定 panel 运行 Critic，输出到 output_dir。
+
+        critic_factory：可选的可注入 Critic 工厂，用于测试。为 None 时用真实
+        ValidityCritic。工厂签名为 ``() -> ValidityCritic``，返回的对象需支持
+        load_inputs / run_all_checks / save_* 接口。
+        """
         self._check_critic_inputs(panel_path)
-        critic = ValidityCritic()
+        critic = critic_factory() if critic_factory is not None else ValidityCritic()
         critic.load_inputs(
             panel_path=panel_path,
             data_dictionary_path=self.data_dictionary,
@@ -968,6 +1625,21 @@ class PipelineRunner:
                 return int(json.load(f).get("summary", {}).get("failed", 0))
         except Exception:  # noqa: BLE001
             return None
+
+    def _read_failed_check_names(self, path: Path) -> list[str]:
+        """读取 validation_report.json 中所有 status=failed 的 check_name。"""
+        if not path.exists():
+            return []
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                report = json.load(f)
+            return [
+                c.get("check_name")
+                for c in report.get("checks", [])
+                if c.get("status") == "failed"
+            ]
+        except Exception:  # noqa: BLE001
+            return []
 
     def _read_approved_features(
         self,

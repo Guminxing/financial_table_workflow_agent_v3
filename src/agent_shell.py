@@ -205,6 +205,14 @@ class AgentShell:
             print(f"  repaired panel rows: {status['repaired_panel_rows']}")
         if status["rows_removed_by_repair"] is not None:
             print(f"  rows removed by repair: {status['rows_removed_by_repair']}")
+        # v2 Remediation Agent 字段（get_status 已从 repair_history.json 恢复历史状态）
+        print(f"  repair rounds: {status.get('repair_rounds', 0)}")
+        print(f"  termination reason: {status.get('termination_reason') or 'n/a'}")
+        if status.get("manual_review_required"):
+            print("  manual review required: YES")
+        unresolved = status.get("unresolved_checks") or []
+        if unresolved:
+            print(f"  unresolved checks: {unresolved}")
         print(f"  approved features: {len(status['approved_feature_columns'])}")
         print(f"  label column: {status['label_column']}")
         label_in = status["label_in_approved_features"]
@@ -312,6 +320,18 @@ class AgentShell:
         print(f"  initial validation status: {s.get('initial_validation_status')}")
         print(f"  final validation status:   {s.get('final_validation_status')}")
         print(f"  rows removed by repair:    {s.get('rows_removed_by_repair')}")
+        # v2 Remediation Agent 字段（从 repair_history.json 读，若存在）
+        rh_path = self._get_runner().repair_history_json
+        if rh_path.exists():
+            with rh_path.open("r", encoding="utf-8") as f:
+                rh = json.load(f)
+            print(f"  repair rounds:             {rh.get('repair_rounds', 0)}")
+            print(f"  termination reason:        {rh.get('termination_reason')}")
+            if rh.get("manual_review_required"):
+                print("  manual review required:   YES")
+            unc = rh.get("unresolved_checks") or []
+            if unc:
+                print(f"  unresolved checks:         {unc}")
         if cl:
             print(f"  initial rows:   {cl.get('initial_rows')}")
             print(f"  repaired rows:  {cl.get('repaired_rows')}")

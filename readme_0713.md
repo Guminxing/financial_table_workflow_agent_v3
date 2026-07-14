@@ -100,9 +100,11 @@ python src/run_all.py
 python src/run_all.py --input_dir data/sample --output_root outputs
 python src/run_all.py --analysis_goal "构建一个用于 5 日收益率预测的日频建模宽表"
 python src/run_all.py --no_repair        # 即使 critic failed 也不自动修复
+python src/run_all.py --max_repair_rounds 3       # Remediation Agent 最大轮数（默认 3）
+python src/run_all.py --max_row_loss_ratio 0.05   # 累计删行上限（默认 5%），超过转人工
 python src/run_all.py --skip_report      # 跳过 Final Report Generator
-python src/run_all.py --clean_outputs    # 运行前清空 outputs
-python src/run_all.py --verbose          # 详细进度
+python src/run_all.py --clean_outputs     # 运行前清空 outputs
+python src/run_all.py --verbose           # 详细进度
 ```
 
 ### 4.3 交互式 Agent Shell
@@ -347,13 +349,13 @@ prepared_panel.csv + data_dictionary.json + execution_log.json + workflow_plan.j
 
 确定性 baseline，不调用 LLM，离线可运行。对 prepared panel 做有效性审查（非普通质量检查）：未来函数、label leakage、announce_date 对齐、rolling 源码静态检查、time-based split 要求等 15 项检查。生成 `approved_feature_columns.json`，从结构上杜绝 label 进入特征矩阵。announce_date 列缺失时区分两种情况——无基本面值则 warning（正常），有基本面值却无 announce_date 则 failed（防时间泄漏）。
 
-### Stage 5: Remediation / Repair Loop（已完成，闭环）
+### Stage 5: Remediation / Repair Loop（已完成，有界多轮闭环）
 
 ```
-prepared_panel.csv + validation_report.json → Repair Loop → repair_plan.json + repaired_panel.csv + repair_log.json + repair_report.md → (重新运行 Critic 复审)
+prepared_panel.csv + validation_report.json → Remediation Agent → repair_plan.json + repaired_panel.csv + repair_log.json + repair_report.md + repair_history.json → (重新运行 Critic 复审)
 ```
 
-确定性 baseline，不调用 LLM，离线可运行。读取 Critic 的 failed/warning 项，生成可解释的修复方案并执行，输出 repaired_panel.csv。当前重点修复 close 缺失（保守删除行，不默认插值）；修复后支持重新运行 Critic 复审，形成"审查 → 修复 → 再审查"闭环。
+确定性 baseline，不调用 LLM，离线可运行。v2（2026-07-14）升级为**有界多轮 Remediation Agent**：每轮 Observe（读最新 Critic 报告）→ Decide（strategy registry 选可执行策略或给 termination_reason）→ Act（在 panel 副本上 apply，安全门按实际行数复核）→ Reflect（重跑 Critic，记录 panel 指纹与 failed check 集合）→ Decide whether to continue。停止条件：`validation_passed` / `no_actionable_strategy` / `no_progress` / `max_rounds_reached` / `manual_review_required` / `stage_failed`。安全门：累计删行 > 原始 panel 的 5%（`--max_row_loss_ratio`）转人工；不伪造 `announce_date`；`label_next_5d` 永不进 `approved_feature_columns`；原始 CSV 不被覆盖。策略注册表含 `drop_rows_with_missing_core_price` / `drop_exact_duplicate_rows` / `trim_industry_name_whitespace`；未知 failed check 走 manual review，绝不猜测。审计文件 `repair_history.json` 即使 blocked/failed 也保存。详见 [docs/stage5_remediation_loop.md](./docs/stage5_remediation_loop.md)。
 
 ### Stage 6: Final Report Generator（已完成，收口）
 
