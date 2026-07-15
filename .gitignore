@@ -46,6 +46,7 @@ data/**/_cache/
 # Credentials / secrets — never commit.
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 *.cookie

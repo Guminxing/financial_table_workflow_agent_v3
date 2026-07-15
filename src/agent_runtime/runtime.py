@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from .context import AgentContext
 from .model_client import ModelClient
@@ -111,6 +111,7 @@ class AgentRuntime:
         context: AgentContext,
         policy: PolicyEngine | None = None,
         max_tool_turns: int = DEFAULT_MAX_TOOL_TURNS,
+        event_callback: "Callable[[AgentEvent], None] | None" = None,
     ) -> None:
         if max_tool_turns < 1:
             raise ValueError(f"max_tool_turns must be >= 1, got {max_tool_turns}")
@@ -119,6 +120,9 @@ class AgentRuntime:
         self.context = context
         self.policy = policy if policy is not None else PolicyEngine()
         self.max_tool_turns = int(max_tool_turns)
+        # Stage 11：可选事件回调，供 CLI 实时打印工具调用进度。
+        # 回调异常被吞掉，绝不影响 Runtime 主循环；不打印完整 messages / 隐藏推理 / API Key。
+        self._event_callback = event_callback
 
         # 运行时状态（run 开始时重置；resume 不重置）
         self._events: list[AgentEvent] = []
@@ -624,13 +628,19 @@ class AgentRuntime:
         self._record_event(EventType.USER_MESSAGE, {"content": text})
 
     def _record_event(self, event_type: EventType, payload: dict[str, Any]) -> None:
-        self._events.append(
-            AgentEvent(
-                event_type=event_type.value,
-                timestamp=_now_iso(),
-                payload=payload,
-            )
+        event = AgentEvent(
+            event_type=event_type.value,
+            timestamp=_now_iso(),
+            payload=payload,
         )
+        self._events.append(event)
+        # Stage 11：实时回调（异常吞掉，不影响主循环）
+        cb = self._event_callback
+        if cb is not None:
+            try:
+                cb(event)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _is_repeated_tool_calls(self, calls: list[ToolCall]) -> bool:
         """检测当前 tool_calls 是否与上一轮完全相同（工具名 + 规范化参数）。
