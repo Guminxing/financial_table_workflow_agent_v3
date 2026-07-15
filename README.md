@@ -3,7 +3,7 @@
 面向金融表格的数据准备、质量审计与真实 A 股数据接入工作流。
 **v3 只使用真实市场数据作为正式输入**；合成样例数据及其自动生成逻辑已彻底移除。
 
-> 目录职责一览见 [DIRECTORY_GUIDE.md](./DIRECTORY_GUIDE.md)；分阶段设计见 [docs/](./docs/)。
+> 目录职责一览见 [DIRECTORY_GUIDE.md](./DIRECTORY_GUIDE.md)；代码结构、模块职责与执行调用链见 [CODE_STRUCTURE.md](./CODE_STRUCTURE.md)；分阶段设计见 [docs/](./docs/)。
 
 ---
 
@@ -46,9 +46,9 @@ Observe（读最新 Critic 报告）
 | 真实测试数据（小型 fixture） | `test_data/real_market_sample/` |
 | 用户运行时下载的真实数据 | `data/real_market/`（不提交 Git） |
 | 运行结果 | `outputs_real/`（不提交 Git） |
-| 文档 | `docs/`、`prompts/`、`README.md`、`DIRECTORY_GUIDE.md` |
+| 文档 | `docs/`、`prompts/`、`README.md`、`DIRECTORY_GUIDE.md`、`CODE_STRUCTURE.md` |
 
-详见 [DIRECTORY_GUIDE.md](./DIRECTORY_GUIDE.md)。
+详见 [DIRECTORY_GUIDE.md](./DIRECTORY_GUIDE.md)。代码结构、模块职责与执行调用链见 [CODE_STRUCTURE.md](./CODE_STRUCTURE.md)。
 
 ## 5. 最小真实数据运行命令
 

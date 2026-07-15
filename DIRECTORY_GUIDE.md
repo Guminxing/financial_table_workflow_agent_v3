@@ -18,6 +18,7 @@ what is **real test data**, what is **user runtime data**, what is
 | `prompts/` | Documentation | Yes | LLM prompt templates reserved for future LLM stages |
 | `README.md` | Documentation | Yes | Project overview + quick start |
 | `DIRECTORY_GUIDE.md` | Documentation | Yes | This file |
+| `CODE_STRUCTURE.md` | Documentation | Yes | Code structure, module responsibilities, execution call chain |
 | `.gitignore` | Config | Yes | Ignore rules for runtime data / outputs / caches / secrets |
 
 ## What goes where
@@ -41,7 +42,7 @@ what is **real test data**, what is **user runtime data**, what is
 - **Run results (`outputs_real/`)** — all pipeline/agent artifacts
   (profiles, plans, prepared panel, validation, repaired, final report,
   session logs). Not committed; regenerated each run.
-- **Documentation (`docs/`, `prompts/`, `README.md`, this file)** —
+- **Documentation (`docs/`, `prompts/`, `README.md`, this file, [CODE_STRUCTURE.md](CODE_STRUCTURE.md))** —
   design and operation docs.
 
 ## Removed in v3
