@@ -5,6 +5,15 @@
 
 > 目录职责一览见 [DIRECTORY_GUIDE.md](./DIRECTORY_GUIDE.md)；代码结构、模块职责与执行调用链见 [CODE_STRUCTURE.md](./CODE_STRUCTURE.md)；分阶段设计见 [docs/](./docs/)。
 
+> **Stage 9（Agent Runtime MVP）**：新增模型驱动的 tool-calling Agent Runtime 骨架
+> （`src/agent_runtime/` + `src/agent_tools/`），按 run_id 隔离每次运行产物。
+> **本阶段不接入真实 LLM**，由测试中的 Fake Model 驱动验证。详见
+> [docs/stage9_agent_runtime_mvp.md](./docs/stage9_agent_runtime_mvp.md)。
+> **Stage 10（PolicyEngine + 审批恢复）**：在每次工具执行前加入确定性权限判断
+> （allow/ask/deny），实现进程内 `resume(ApprovalResponse)` 暂停/恢复。详见
+> [docs/stage10_policy_and_approval.md](./docs/stage10_policy_and_approval.md)。
+> 原 Agent Shell 仍是固定命令模式，未被替换。
+
 ---
 
 ## 1. 项目目标
@@ -100,3 +109,45 @@ no_progress/max_rounds）注入到 fixture 的**临时副本**，不修改被提
 
 `data/real_market/`、`outputs_real/`、缓存、session 日志、凭据均被 `.gitignore` 忽略。
 唯一提交的真实数据是 `test_data/real_market_sample/` 下的小型测试 fixture。
+
+## 9. Agent Runtime MVP（Stage 9）
+
+Stage 9 新增**模型驱动的 tool-calling Agent Runtime 骨架**，与原固定命令式
+Agent Shell 并存（原 Shell 未被替换）：
+
+- `src/agent_runtime/`：`models.py`（ToolCall/ToolResult/ToolSpec/AgentEvent/...）、
+  `context.py`（AgentContext + run_id 隔离）、`registry.py`（ToolRegistry + schema 校验）、
+  `model_client.py`（ModelClient Protocol）、`runtime.py`（有界 tool-calling 循环）。
+- `src/agent_tools/pipeline_tools.py`：把 PipelineRunner 阶段包装成 10 个领域工具。
+- 每次 Agent run 用独立 `outputs_real/runs/<run_id>/` 隔离产物。
+
+**本阶段不接入真实 LLM**：`ModelClient` 只定义 Protocol，由测试中的
+`ScriptedFakeModel` 驱动验证。真实模型适配器、`chat_agent.py` 自然语言 CLI、
+权限审批（allow/ask/deny）、暂停恢复、session 持久化均属后续阶段。
+
+调用链：用户消息 → ModelClient → Fake Model 返回 ToolCall → AgentRuntime →
+ToolRegistry → PipelineRunner 领域工具 → ToolResult → 回填模型上下文 →
+Fake Model 决定继续或输出最终回答。
+
+详见 [docs/stage9_agent_runtime_mvp.md](./docs/stage9_agent_runtime_mvp.md)。
+
+## 10. PolicyEngine + 审批恢复（Stage 10）
+
+Stage 10 在 Stage 9 的 Runtime 上加入**确定性权限审批**与**进程内暂停/恢复**：
+
+- `src/agent_runtime/policy.py`：`PolicyEngine` + `PolicyAction`(ALLOW/ASK/DENY) +
+  `PolicyConfig`/`PolicyRule`/`PolicyDecision`/`PendingApproval`/`ApprovalResponse`。
+  默认策略：`read`/`workspace_write`→ALLOW、`guarded`→ASK、未知→DENY。
+  优先级：工具级 DENY > ASK > ALLOW > risk 默认 > 默认 DENY。完全确定性，不调用模型。
+- `src/agent_runtime/runtime.py`：执行工具前必过 `PolicyEngine`；ASK 暂停返回
+  `stop_reason=awaiting_approval` + `pending_approval`；`resume(ApprovalResponse)`
+  校验 request_id/run_id/fingerprint（防篡改、防跨 run、防重放），批准执行一次、
+  拒绝回填 `TOOL_REJECTED_BY_USER`，从断点继续；多 ToolCall 中途暂停后不丢失不重复。
+- `src/pipeline_runner.py`：新增薄公开方法 `run_noop_repair()`，`pipeline_tools`
+  的 not_needed 分支改走它，不再触碰私有方法。
+
+**本阶段只做进程内暂停/恢复**，不实现 session 持久化、真实 LLM、chat CLI。
+审批只决定"是否执行"，执行仍走 PipelineRunner → Remediation Agent，**不绕过**
+删行阈值、轮数限制、标签泄漏保护等内部安全门。
+
+详见 [docs/stage10_policy_and_approval.md](./docs/stage10_policy_and_approval.md)。

@@ -195,6 +195,117 @@ class PipelineRunner:
         """Stage 5: Repair Loop。"""
         return self._run_stage("repair", self._repair_impl)
 
+    def run_remediation_agent(self) -> dict[str, Any]:
+        """Stage 5（多轮）：有界 Remediation Agent 的薄公开入口。
+
+        本方法是 Stage 9 Agent Runtime 引入的**薄包装**，只负责：
+        - 检查前置条件（initial critic 已运行且产物存在）；
+        - 委托现有私有实现 :meth:`_run_remediation_agent`；
+        - 返回标准 ``repair`` 阶段记录。
+
+        **不**复制多轮修复逻辑；所有 Observe/Decide/Act/Reflect/Stop 仍在
+        :meth:`_remediation_agent_loop` 中。Agent 工具通过本方法触发有界修复闭环，
+        复用既有安全门（max_row_loss_ratio / no_progress / manual_review_required /
+        unresolved_checks / label 泄漏保护）。
+
+        前置条件：
+        - ``initial_critic`` 阶段已运行（否则 initial validation 不存在）；
+        - prepared_panel / initial_validation_json / data_dictionary /
+          initial_approved 存在（_remediation_agent_loop 内部也会校验）。
+
+        返回 ``self.stages["repair"]`` 记录（与 run_repair 一致的阶段记录结构）。
+        """
+        # 前置条件：initial critic 必须已运行
+        init_rec = self.stages.get("initial_critic", {})
+        if init_rec.get("status") in (None, "pending"):
+            raise RuntimeError(
+                "run_remediation_agent: initial_critic has not run yet; "
+                "run validate_financial_panel / run_initial_critic first."
+            )
+        # 前置产物存在性（_remediation_agent_loop 内部也会校验，这里提前给出清晰错误）
+        for label, path in [
+            ("panel", self.prepared_panel),
+            ("validation_report", self.initial_validation_json),
+            ("data_dictionary", self.data_dictionary),
+            ("approved_features", self.initial_approved),
+        ]:
+            if not Path(path).exists():
+                raise FileNotFoundError(
+                    f"run_remediation_agent: {label} not found: {path}"
+                )
+        # 委托现有私有实现（含异常捕获、repair_history.json 写入）
+        self._run_remediation_agent()
+        return self.stages["repair"]
+
+    def run_noop_repair(
+        self,
+        initial_status: str | None = None,
+        no_op_kind: str = "no_repair_needed",
+    ) -> dict[str, Any]:
+        """Stage 5（no-op）：无需实际 Repair 时生成统一 no-op 产物。
+
+        本方法是 Stage 10 引入的**薄公开入口**，封装 :meth:`run_full_pipeline`
+        中"initial critic 未 failed / auto_repair=False"分支的 no-op 逻辑，
+        让 Agent 工具（``run_safe_remediation`` 的 not_needed 分支）只走公开 API，
+        不再触碰 ``_write_noop_repair_artifacts`` / ``_write_repair_history`` /
+        ``_mark_skipped`` 等私有方法。
+
+        前置条件：``initial_critic`` 阶段已运行（否则 initial validation 不存在）。
+
+        参数：
+        - ``initial_status``: initial critic 的 overall_status；为 None 时从
+          ``initial_validation.json`` 读取。
+        - ``no_op_kind``: ``no_repair_needed``（initial 未 failed）或
+          ``repair_disabled``（initial failed 但 --no_repair）。
+
+        行为（与 run_full_pipeline 的 else 分支完全一致）：
+        - mark_skipped repair / repaired_critic；
+        - 写 no-op 产物（repaired_panel / repair_plan / repair_log / 复审 validation）；
+        - 按 no_op_kind 设置 termination_reason / manual_review_required /
+          unresolved_checks / repair_rounds_run=0 / _has_run_remediation=True；
+        - 写 repair_history.json（0 轮）。
+
+        返回 ``self.stages["repair"]`` 记录。
+        """
+        # 前置条件：initial critic 必须已运行
+        init_rec = self.stages.get("initial_critic", {})
+        if init_rec.get("status") in (None, "pending"):
+            raise RuntimeError(
+                "run_noop_repair: initial_critic has not run yet; "
+                "run validate_financial_panel / run_initial_critic first."
+            )
+        if initial_status is None:
+            initial_status = init_rec.get("summary", {}).get(
+                "overall_status", "unknown"
+            )
+
+        self._mark_skipped("repair", reason=self._skip_repair_reason(initial_status))
+        self._mark_skipped(
+            "repaired_critic", reason="repair skipped; no re-critic needed"
+        )
+        self._write_noop_repair_artifacts(initial_status, no_op_kind)
+        # no-op 场景也写 repair_history.json（0 轮），保证审计文件始终存在
+        self.repair_rounds_run = 0
+        if no_op_kind == "repair_disabled":
+            # initial critic failed 但 --no_repair：最终仍 failed，
+            # unresolved_checks 记录初始 failed check 名，manual_review_required=True
+            self.termination_reason = "repair_disabled"
+            init_failed = self._read_failed_check_names(self.initial_validation_json)
+            self.unresolved_checks = init_failed
+            self.manual_review_required = bool(init_failed)
+        else:
+            self.termination_reason = "validation_passed"
+            self.manual_review_required = False
+            self.unresolved_checks = []
+        self._has_run_remediation = True
+        self._write_repair_history(
+            rounds=[],
+            termination_reason=self.termination_reason,
+            manual_review_required=bool(self.manual_review_required),
+            unresolved_checks=list(self.unresolved_checks),
+        )
+        return self.stages["repair"]
+
     def run_repaired_critic(self) -> dict[str, Any]:
         """Stage 6: 对 repaired panel 重新运行 Critic。"""
         return self._run_stage("repaired_critic", self._repaired_critic_impl)
@@ -265,31 +376,7 @@ class PipelineRunner:
                 no_op_kind = "repair_disabled"
             else:
                 no_op_kind = "no_repair_needed"
-            self._mark_skipped("repair", reason=self._skip_repair_reason(initial_status))
-            self._mark_skipped(
-                "repaired_critic", reason="repair skipped; no re-critic needed"
-            )
-            self._write_noop_repair_artifacts(initial_status, no_op_kind)
-            # no-op 场景也写 repair_history.json（0 轮），保证审计文件始终存在
-            self.repair_rounds_run = 0
-            if no_op_kind == "repair_disabled":
-                # initial critic failed 但 --no_repair：最终仍 failed，
-                # unresolved_checks 记录初始 failed check 名，manual_review_required=True
-                self.termination_reason = "repair_disabled"
-                init_failed = self._read_failed_check_names(self.initial_validation_json)
-                self.unresolved_checks = init_failed
-                self.manual_review_required = bool(init_failed)
-            else:
-                self.termination_reason = "validation_passed"
-                self.manual_review_required = False
-                self.unresolved_checks = []
-            self._has_run_remediation = True
-            self._write_repair_history(
-                rounds=[],
-                termination_reason=self.termination_reason,
-                manual_review_required=bool(self.manual_review_required),
-                unresolved_checks=list(self.unresolved_checks),
-            )
+            self.run_noop_repair(initial_status, no_op_kind)
 
         # 7. final report
         if not self.skip_report:

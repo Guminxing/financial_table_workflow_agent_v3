@@ -36,14 +36,30 @@ financial_table_workflow_agent_v3/
 │   ├── run_repair.py                   # Stage 5 CLI 入口（单轮，向后兼容）
 │   ├── report_generator.py             # Stage 7: ReportGenerator 最终报告
 │   ├── run_report_generator.py         # Stage 7 CLI 入口
-│   ├── pipeline_runner.py              # Stage 7: PipelineRunner 统一调度器 + Remediation Agent 多轮循环
+│   ├── pipeline_runner.py              # Stage 7: PipelineRunner 统一调度器 + Remediation Agent 多轮循环（Stage 9 增加 run_remediation_agent()；Stage 10 增加 run_noop_repair()）
 │   ├── run_all.py                      # Stage 7: 一键运行入口（推荐主入口）
-│   ├── agent_shell.py                  # Stage 7: 交互式 Agent Shell
+│   ├── agent_shell.py                  # Stage 7: 交互式 Agent Shell（固定命令模式，未替换）
 │   ├── real_data_adapter.py            # Stage 8: 真实 A 股数据适配器
-│   └── run_fetch_real_data.py          # Stage 8: 真实数据抓取 CLI（可 --run_pipeline）
+│   ├── run_fetch_real_data.py          # Stage 8: 真实数据抓取 CLI（可 --run_pipeline）
+│   ├── agent_runtime/                  # Stage 9–10: Agent Runtime（模型驱动 tool-calling 骨架 + 确定性权限审批，不接入真实 LLM）
+│   │   ├── __init__.py
+│   │   ├── models.py                   # ToolCall/ToolResult/ToolSpec/AgentEvent/AgentRunResult/RiskLevel/StopReason(+awaiting_approval)/EventType(+policy/approval/tool_denied)
+│   │   ├── context.py                  # AgentContext + run_id 隔离（路径穿越防护）
+│   │   ├── registry.py                 # ToolRegistry + 基础 JSON Schema 校验
+│   │   ├── model_client.py             # ModelClient Protocol（不依赖具体 SDK）
+│   │   ├── policy.py                   # Stage 10: PolicyEngine + PolicyAction(allow/ask/deny) + PolicyConfig/Rule/Decision + PendingApproval/ApprovalResponse
+│   │   └── runtime.py                  # 有界 tool-calling 循环 + 进程内审批恢复（run/resume，max_tool_turns + 重复检测）
+│   └── agent_tools/                    # Stage 9: 领域工具（把 PipelineRunner 阶段包装成工具）
+│       ├── __init__.py
+│       └── pipeline_tools.py           # 10 个 pipeline 工具 + build_default_registry()（not_needed 分支走 run_noop_repair()）
 ├── tests/                              # 测试代码（全部提交 Git）
 │   ├── __init__.py                     # 包标记
-│   └── test_remediation_agent.py       # Remediation Agent 单元/集成测试（23 项）
+│   ├── test_remediation_agent.py       # Remediation Agent 单元/集成测试（23 项）
+│   ├── test_tool_registry.py           # Stage 9: ToolRegistry + schema 校验测试
+│   ├── test_agent_runtime.py           # Stage 9: AgentRuntime + AgentContext/run_id 测试（含 ScriptedFakeModel）
+│   ├── test_pipeline_tools.py          # Stage 9: Pipeline 领域工具测试
+│   ├── test_policy_engine.py           # Stage 10: PolicyEngine + 策略优先级测试（16 项）
+│   └── test_runtime_approval.py        # Stage 10: 审批暂停/恢复 + 防篡改防重放 + 多 ToolCall 恢复测试（18 项）
 ├── test_data/                          # 测试数据
 │   └── real_market_sample/             # 小型真实 A 股 fixture（提交 Git）
 │       ├── README.md                   # fixture 来源、抓取命令、行数、免责声明
@@ -57,7 +73,9 @@ financial_table_workflow_agent_v3/
 │   └── real_market/                    # 用户运行时下载的真实数据（不提交 Git，仅 .gitkeep）
 │       └── .gitkeep
 ├── outputs_real/                       # 正式运行产物（不提交 Git，仅 .gitkeep）
-│   └── .gitkeep
+│   ├── .gitkeep
+│   └── runs/                           # Stage 9: Agent Runtime 按 run_id 隔离的运行目录
+│       └── <run_id>/                   # profiles/plans/prepared/validation/repaired/...
 ├── docs/                               # 分阶段设计文档
 │   ├── project_scope.md                # 项目范围与第一阶段说明
 │   ├── project_overview_zh.md           # 面向导师的项目总说明（六阶段汇总）
@@ -67,7 +85,9 @@ financial_table_workflow_agent_v3/
 │   ├── stage5_remediation_loop.md       # Stage 5 设计（有界多轮）
 │   ├── stage6_report_generator.md      # Stage 6/7 报告生成设计
 │   ├── stage7_agent_shell.md           # Stage 7 一键运行 + Agent Shell 设计
-│   └── stage8_real_data_adapter.md      # Stage 8 真实数据适配器设计
+│   ├── stage8_real_data_adapter.md      # Stage 8 真实数据适配器设计
+│   ├── stage9_agent_runtime_mvp.md      # Stage 9 Agent Runtime MVP 设计（不接入真实 LLM）
+│   └── stage10_policy_and_approval.md   # Stage 10 PolicyEngine + 审批恢复设计
 ├── prompts/
 │   └── workflow_planner_prompt.md      # LLM Planner Prompt 模板（供后续接入 LLM）
 ├── README.md                           # 项目总览 + 快速开始（v3）
@@ -78,8 +98,20 @@ financial_table_workflow_agent_v3/
 └── .gitignore                          # 忽略运行时数据/产物/缓存/凭据
 ```
 
-> `src/` 共 18 个 Python 文件：1 个包标记（`__init__.py`）+ 9 个核心模块
-> + 8 个 CLI 入口。`tests/` 共 2 个 Python 文件。
+> `src/` 共 27 个 Python 文件：1 个包标记（`__init__.py`）+ 9 个核心模块
+> + 8 个 CLI 入口 + Stage 9–10 的 `agent_runtime/`（7 个文件，含 Stage 10 的 `policy.py`）
+> 与 `agent_tools/`（2 个文件）。
+> `tests/` 共 7 个 Python 文件（原 23 项 Remediation Agent 测试 + Stage 9 的
+> `test_tool_registry.py` / `test_agent_runtime.py` / `test_pipeline_tools.py`
+> + Stage 10 的 `test_policy_engine.py` / `test_runtime_approval.py`）。
+
+> **Stage 9–10 说明**：`agent_runtime/` + `agent_tools/` 是模型驱动的 tool-calling
+> Agent Runtime **骨架**，**不接入真实 LLM**（`ModelClient` 只定义 Protocol，
+> 由测试中的 `ScriptedFakeModel` 驱动）。Stage 10 在 Runtime 上加入确定性
+> `PolicyEngine`（allow/ask/deny）与进程内 `resume(ApprovalResponse)` 暂停/恢复。
+> 原 `agent_shell.py` 仍是固定命令模式，未被替换。详见
+> [docs/stage9_agent_runtime_mvp.md](docs/stage9_agent_runtime_mvp.md) 与
+> [docs/stage10_policy_and_approval.md](docs/stage10_policy_and_approval.md)。
 
 ---
 
@@ -213,8 +245,15 @@ Decide whether to continue
 | `critic.py` | `ValidityCritic`（`load_inputs()` / `run_all_checks()` / `save_json_report()` / `save_markdown_report()` / `save_approved_feature_columns()`） | 对 prepared/repaired panel 做 15 项有效性审查（未来函数 / label leakage / announce_date 对齐 / 源码静态检查 / 时间切分），输出 `validation_report.json` + `.md` + `approved_feature_columns.json` | `run_critic.py`、`PipelineRunner._run_critic()`（初始 + 每轮复审） |
 | `repair.py` | `RepairLoop`（`load_inputs()` / `decide_round()` / `apply_selected()` / `failed_checks_of()` / `panel_fingerprint()` / `build_repair_plan()` / `apply_repairs()` / `save_outputs()` / `save_report()`）；`RepairStrategy` 协议；`DropRowsWithMissingCorePrice` / `DropExactDuplicateRows` / `TrimIndustryNameWhitespace`；`DEFAULT_STRATEGIES` / `list_strategies()` | 策略注册表 + 有界多轮修复决策；单轮接口向后兼容 `run_repair.py`；多轮调度由 `PipelineRunner` 驱动 | `run_repair.py`（单轮）、`PipelineRunner._remediation_agent_loop()`（多轮） |
 | `report_generator.py` | `ReportGenerator`（`load_inputs()` / `build_summary()` / `build_artifacts_index()` / `render_full_report()` / `render_one_page()` / `save_all()`） | 只读前五阶段全部产物，汇总成 `final_workflow_summary.json` + `final_workflow_report.md` + `final_workflow_one_page.md` + `pipeline_artifacts_index.json`；动态读取实际结果，不硬编码行数 | `run_report_generator.py`、`PipelineRunner._final_report_impl()` |
-| `pipeline_runner.py` | `PipelineRunner`（`run_profile()` / `run_planner()` / `run_executor()` / `run_initial_critic()` / `run_repair()` / `run_repaired_critic()` / `run_final_report()` / `run_full_pipeline()` / `get_status()` / `save_session_log()` / `print_dashboard()`；`_run_remediation_agent()` / `_remediation_agent_loop()` / `_write_repair_history()`） | 统一调度器：复用前六阶段内部类按序运行并记录状态；内含 Remediation Agent 多轮闭环；no-op 产物生成；session log | `run_all.py`、`agent_shell.py`、`run_fetch_real_data.py --run_pipeline` |
-| `agent_shell.py` | `AgentShell`（`loop()` / `dispatch()` / `_cmd_*`；`INTENT_ALIASES`） | 交互式 Agent Shell：`run all` / `run <stage>` / `status` / `show summary` / `show failures` / `show features` / `open report` / `set goal|input_dir|output_root`；模糊命令 intent mapping；从 `repair_history.json` 恢复历史状态 | `python src/agent_shell.py`（终端用户） |
+| `pipeline_runner.py` | `PipelineRunner`（`run_profile()` / `run_planner()` / `run_executor()` / `run_initial_critic()` / `run_repair()` / `run_remediation_agent()` / `run_noop_repair()` / `run_repaired_critic()` / `run_final_report()` / `run_full_pipeline()` / `get_status()` / `save_session_log()` / `print_dashboard()`；`_run_remediation_agent()` / `_remediation_agent_loop()` / `_write_repair_history()`） | 统一调度器：复用前六阶段内部类按序运行并记录状态；内含 Remediation Agent 多轮闭环；no-op 产物生成；session log；Stage 9 增加薄公开方法 `run_remediation_agent()`；Stage 10 增加薄公开方法 `run_noop_repair()`（no-op 产物单一事实源，供 Agent 工具与 run_full_pipeline 复用） | `run_all.py`、`agent_shell.py`、`run_fetch_real_data.py --run_pipeline`、`agent_tools/pipeline_tools.py` |
+| `agent_shell.py` | `AgentShell`（`loop()` / `dispatch()` / `_cmd_*`；`INTENT_ALIASES`） | 交互式 Agent Shell（**固定命令模式，Stage 9 未替换**）：`run all` / `run <stage>` / `status` / `show summary` / `show failures` / `show features` / `open report` / `set goal|input_dir|output_root`；模糊命令 intent mapping；从 `repair_history.json` 恢复历史状态 | `python src/agent_shell.py`（终端用户） |
+| `agent_runtime/models.py` | `RiskLevel` / `ToolCall` / `ToolError` / `ToolResult` / `ToolSpec` / `AssistantTurn` / `AgentEvent` / `EventType` / `AgentRunResult` / `StopReason` | Stage 9–10 Agent Runtime 核心数据结构（清晰、最小、可序列化；不含 DataFrame/runner 对象）；Stage 10 增 `StopReason.AWAITING_APPROVAL`、policy/approval/tool_denied 事件、`AgentRunResult.pending_approval` | `agent_runtime/registry.py`、`agent_runtime/runtime.py`、`agent_tools/pipeline_tools.py`、测试 |
+| `agent_runtime/context.py` | `AgentContext`（`create()` / `configure_runner()` / `get_runner()` / `ensure_artifact_in_run_root()` / `to_dict()`）；`normalize_run_id()` / `validate_input_dir()`；`RunIdError` / `InputDirError` | Stage 9：每次 Agent run 的上下文 + run_id 隔离（路径穿越防护、run_root 严格位于 output_base/runs/run_id、input_dir 缺失即明确失败绝不生成合成数据） | `agent_tools/pipeline_tools.py`、`agent_runtime/runtime.py`、测试 |
+| `agent_runtime/registry.py` | `ToolRegistry`（`register()` / `get()` / `list_specs()` / `schemas_for_model()` / `execute()`）；`validate_arguments()` / `SchemaValidationError`；`build_registry()` | Stage 9：工具注册表 + 基础 JSON Schema 校验；未知工具/参数错误/handler 异常均转结构化 ToolResult，不抛到顶层，不泄漏 traceback | `agent_tools/pipeline_tools.py`、`agent_runtime/runtime.py`、测试 |
+| `agent_runtime/model_client.py` | `ModelClient`（Protocol：`complete(messages, tools) -> AssistantTurn`） | Stage 9：抽象模型接口，不依赖任何具体 SDK，不读 API Key；本轮由测试中的 `ScriptedFakeModel` 实现 | `agent_runtime/runtime.py`、测试 |
+| `agent_runtime/policy.py` | `PolicyEngine`（`decide(tool_name, risk_level, *, run_id) -> PolicyDecision`）；`PolicyAction`(ALLOW/ASK/DENY) / `PolicyConfig`(`default()` / `with_overrides()`) / `PolicyRule` / `PolicyDecision` / `PendingApproval` / `ApprovalResponse`；`make_fingerprint()` / `new_request_id()` | Stage 10：确定性权限引擎（不调用模型/IO/墙钟）；默认 read/write→ALLOW、guarded→ASK、未知→DENY；优先级 工具级 DENY>ASK>ALLOW > risk 默认 > 默认 DENY | `agent_runtime/runtime.py`、测试 |
+| `agent_runtime/runtime.py` | `AgentRuntime`（`run(user_message) -> AgentRunResult` / `resume(ApprovalResponse) -> AgentRunResult`）；`DEFAULT_MAX_TOOL_TURNS` | Stage 9–10：有界 tool-calling 循环（顺序执行、重复检测、requires_user_action 停止、事件记录）；Stage 10 执行前过 PolicyEngine（ALLOW/ASK/DENY），ASK 暂停返回 awaiting_approval+pending_approval，resume 校验 request_id/run_id/fingerprint（防篡改/防跨 run/防重放）后从断点继续；不直接调 PipelineRunner，只通过 ToolRegistry | 测试（由 `ScriptedFakeModel` 驱动） |
+| `agent_tools/pipeline_tools.py` | `build_default_registry()` / `build_default_registry_specs()`；10 个工具 handler（`_tool_configure_workflow` 等） | Stage 9–10：把 PipelineRunner 阶段包装成 10 个领域工具（configure/inspect/profile/plan/prepare/validate/remediation/revalidate/report/inspect_failures）；只返回摘要+指标+产物路径+下一步；label 泄漏即安全错误；not_needed 分支走公开 `run_noop_repair()`，不触碰私有方法 | `agent_runtime/runtime.py`（经 ToolRegistry）、测试 |
 | `run_fetch_real_data.py` | `parse_args()` / `main()` | 抓取真实数据 CLI；解析参考项目路径；可选 `--run_pipeline` 直接调 `PipelineRunner` | 终端用户 |
 | `run_all.py` | `parse_args()` / `main()` / `_compute_exit_code()` / `_validate_remediation_args()` | 一键运行 CLI；三态退出码（0 passed / 1 stage failed / 2 ran but manual_review） | 终端用户（推荐主入口） |
 | `run_profile.py` / `run_planner.py` / `run_executor.py` / `run_critic.py` / `run_repair.py` / `run_report_generator.py` | 各自 `parse_args()` / `main()` | 单阶段 CLI，调试用；默认路径已指向 `data/real_market` 与 `outputs_real/...` | 终端用户（调试/单阶段） |
@@ -246,6 +285,7 @@ Decide whether to continue
 | `outputs_real/validation_repaired/` | `validation_report.json` / `validation_report.md` / `approved_feature_columns.json` | Stage 6 | 复审 Critic 报告 + 复审 approved features |
 | `outputs_real/final_report/` | `final_workflow_summary.json` / `final_workflow_report.md` / `final_workflow_one_page.md` / `pipeline_artifacts_index.json` | Stage 7 | 六阶段汇总 + 总报告 + 一页摘要 + 产物索引 |
 | `outputs_real/sessions/` | `latest_session.json` / `session_YYYYMMDD_HHMMSS.json` | Stage 7 | 每次运行的完整状态快照 |
+| `outputs_real/runs/<run_id>/` | 同上 7 个子目录（profiles/plans/prepared/validation/repaired/validation_repaired/final_report/sessions） | Stage 9 | Agent Runtime 按 run_id 隔离的运行目录；每个 run 一个独立 PipelineRunner，互不读取/恢复 |
 
 ### 关键安全约束（以代码为准）
 
@@ -258,12 +298,25 @@ Decide whether to continue
   `"None"/"nan"/"<NA>"`；`real_data_adapter._build_fundamentals()` 不把当前快照回填到历史日期。
 - **无法安全修复时转 manual review**：未知 failed check 走 `no_actionable_strategy`；
   累计删行超 `max_row_loss_ratio` 走 `manual_review_required`；超限修复结果不保存，回退到本轮输入。
+- **Stage 9 Agent Runtime 安全边界**：`AgentContext` 校验 input_dir（缺失即明确失败，绝不生成合成数据）；
+  run_id 路径穿越防护；run_root 严格位于 `output_base/runs/run_id`；工具只写当前 run_root；
+  `label_in_approved_features=True` 时工具返回安全错误并 `requires_user_action=True`；
+  `manual_review_required` 时 `requires_user_action=True`，Runtime 停止；
+  Runtime 有界（`max_tool_turns` 默认 12 + 重复检测）；不接入真实 LLM，不实现任意 shell/Python/MCP。
+- **Stage 10 权限审批安全边界**：`PolicyEngine` 是 Runtime 执行前的**唯一**授权入口，
+  完全确定性（不调用模型/IO/墙钟）；默认 guarded→ASK；模型与用户文本不能自行修改策略或声明
+  "已授权"；`resume` 校验 request_id/run_id/fingerprint（防篡改、防跨 run、防重放），审批只能
+  消费一次；审批只决定"是否执行"，执行仍走 PipelineRunner → Remediation Agent，**不绕过**
+  删行阈值、轮数限制、标签泄漏保护等内部安全门；`awaiting_approval`（执行前/未执行/有 pending）
+  与 `requires_user_action`（执行后/已执行/无 pending）严格区分。
 
 ---
 
 ## 7. 测试结构
 
-测试代码位于 `tests/test_remediation_agent.py`，共 **23 项** unittest，分 5 个 `TestCase`：
+测试代码位于 `tests/`，共 **102 项** unittest，分 13 个 `TestCase`：
+
+### 7.1 Remediation Agent 测试（`test_remediation_agent.py`，23 项）
 
 | 测试类 | 测试数 | 主要覆盖内容 | 数据来源 |
 |---|---|---|---|
@@ -272,6 +325,28 @@ Decide whether to continue
 | `TestExitCodes` | 6 | `run_all.py` 三态退出码：0（passed / 一轮收敛）/ 1（参数越界）/ 2（manual_review / `--no_repair` + initial failed） | 真实 fixture 临时副本（subprocess 调 `run_all.py`） |
 | `TestShellStateRestore` | 2 | `agent_shell` 从 `repair_history.json` 恢复历史状态；`--demo_commands` 显示恢复后的状态 | 真实 fixture 临时副本（subprocess） |
 | `TestRepairHistorySchema` | 1 | `repair_history.json` 顶层与每轮字段完整性 | 真实 fixture 临时副本 |
+
+### 7.2 Stage 9 Agent Runtime 测试（3 个文件，45 项）
+
+| 测试文件 | 测试类 | 测试数 | 主要覆盖内容 | 数据来源 |
+|---|---|---|---|---|
+| `test_tool_registry.py` | `TestRegistryCore` / `TestSchemaValidation` | 11 | A1 注册查找 / A2 重复拒绝 / A3 未知工具结构化错误 / A4 缺 required / A5 类型错误 / A6 handler 异常转 ToolResult / A7 schema 导出；boolean 严格非 int、enum、array items | 内存（无 fixture） |
+| `test_agent_runtime.py` | `TestRunId` / `TestAgentContext` / `TestAgentRuntime` | 22 | B1–B6 run_id 隔离 / D1–D10 Runtime 行为（执行/回填/completed/max_tool_turns/重复/未知工具/失败反馈/requires_user_action/事件/不直接依赖 runner）+ model_protocol_error | 真实 fixture 临时副本 + `ScriptedFakeModel` |
+| `test_pipeline_tools.py` | `TestPipelineTools` / `TestPipelineToolsInputValidation` | 12 | C1–C10 输入校验/不生成合成数据/configure run_root/profile/stage 失败/status 只读当前 run/validation 结构化/remediation 安全状态传递/label 不进 features/not_needed | 真实 fixture 临时副本 |
+
+### 7.3 Stage 10 权限审批测试（2 个文件，34 项）
+
+| 测试文件 | 测试类 | 测试数 | 主要覆盖内容 | 数据来源 |
+|---|---|---|---|---|
+| `test_policy_engine.py` | `TestPolicyDefaults` / `TestPolicyRulesAndPriority` / `TestDeterminism` / `TestSerialization` | 16 | read/write/guarded/unknown 默认决策；工具级 allow/ask/deny 与优先级（DENY>ASK>ALLOW）；确定性（相同输入多次一致、decide 不改 config）；所有结构可 JSON 序列化；fingerprint 稳定且 run 作用域；request_id 唯一 | 内存（无 fixture） |
+| `test_runtime_approval.py` | `TestHandlerNotExecutedOnAskDeny` / `TestApproveExecutesOnce` / `TestRejectFeedback` / `TestResumeRejection` / `TestResumeDoesNotResetCounters` / `TestMultiToolCallResume` / `TestGuardedRemediationDefaultAsk` / `TestApprovalDoesNotBypassSafetyGate` / `TestAwaitingVsRequiresUserAction` / `TestNoopRepairPublicAPIOnly` / `TestEndToEndRepairPath` | 18 | ASK/DENY 时 handler 未执行；批准后只执行一次；拒绝后不执行并反馈；错误 request_id/参数篡改/跨 run/重复审批被拒绝；resume 后轮数与重复检测不重置；多 ToolCall 暂停后正确继续（含 DENY 不中断后续）；guarded remediation 默认 ASK；批准后仍受安全门约束；awaiting_approval vs requires_user_action 不混淆；no-op repair 只用公开 API（源码断言）；实际修复路径端到端通过 | 真实 fixture 临时副本 + `ScriptedFakeModel` |
+
+**Stage 9 测试关键设计**：
+
+- `ScriptedFakeModel`：按顺序返回预设 `AssistantTurn`，记录收到的 messages/tools，预设耗尽即明确失败；不访问网络，不依赖 LLM SDK。
+- 真实 fixture 复制到临时目录后使用（`_copy_fixture`），不修改 `test_data/real_market_sample`。
+- 每个 run_id 用独立 input 子目录，避免同一测试中多次 `copytree` 冲突。
+- 不写入被 Git 跟踪的数据目录；不访问网络；不要求真实 API Key；不依赖 `outputs_real` 历史产物。
 
 **测试关键设计**：
 
@@ -330,6 +405,11 @@ python -B src/agent_shell.py --input_dir data/real_market --output_root outputs_
 python -B -m unittest discover -s tests -v
 ```
 
+> Stage 9 新增 `test_tool_registry.py` / `test_agent_runtime.py` / `test_pipeline_tools.py`，
+> Stage 10 新增 `test_policy_engine.py` / `test_runtime_approval.py`，
+> 共 102 项测试（原 23 + Stage 9 的 45 + Stage 10 的 34）。测试用 `ScriptedFakeModel`
+> 驱动 Agent Runtime，不接入真实 LLM。
+
 **5. 使用真实 fixture 做最小验证**（无需网络，用提交的小型真实 fixture 跑流水线）
 
 ```powershell
@@ -338,6 +418,10 @@ python -B src/run_all.py --input_dir test_data/real_market_sample --output_root 
 
 > 也可用一键命令 `python -B src/run_fetch_real_data.py ... --run_pipeline --output_root outputs_real`
 > 一次完成抓取 + 流水线。
+
+> **Stage 9 Agent Runtime** 目前没有面向终端用户的 CLI 入口（`chat_agent.py` 属后续阶段）；
+> Runtime 通过 Python API（`AgentRuntime(model, registry, context).run(msg)`）使用，
+> 由测试中的 `ScriptedFakeModel` 驱动。
 
 ---
 
@@ -356,4 +440,10 @@ python -B src/run_all.py --input_dir test_data/real_market_sample --output_root 
 9. `src/real_data_adapter.py` — 看 `fetch_real_data()` 与 `_build_fundamentals()` 理解真实数据接入与基本面时间点约束。
 10. `src/profiler.py` / `src/planner.py` / `src/report_generator.py` — 前三阶段与收口报告的实现细节。
 11. `tests/test_remediation_agent.py` — 看 `FakeCritic` / `_copy_fixture` 与 5 个 `TestCase` 理解测试如何用真实 fixture 验证 Agent 行为。
-12. [docs/](docs/) — 分阶段设计文档（`stage2`–`stage8` + `project_scope.md` + `project_overview_zh.md`）。
+12. [docs/](docs/) — 分阶段设计文档（`stage2`–`stage10` + `project_scope.md` + `project_overview_zh.md`）。
+13. [docs/stage9_agent_runtime_mvp.md](docs/stage9_agent_runtime_mvp.md) — Stage 9 Agent Runtime MVP 设计（ModelClient / ToolSpec / ToolRegistry / AgentContext / Runtime 循环 / 停止条件 / Fake Model 测试 / 安全边界 / 下一阶段）。
+14. [docs/stage10_policy_and_approval.md](docs/stage10_policy_and_approval.md) — Stage 10 PolicyEngine + 审批恢复设计（默认策略与优先级 / pause/resume 防篡改防重放 / 多 ToolCall 恢复 / awaiting vs requires_user_action / 安全门不被绕过）。
+15. `src/agent_runtime/models.py` → `context.py` → `registry.py` → `model_client.py` → `policy.py` → `runtime.py` — Agent Runtime 骨架的阅读顺序。
+16. `src/agent_tools/pipeline_tools.py` — 10 个领域工具如何把 PipelineRunner 阶段包装成 ToolSpec。
+17. `tests/test_agent_runtime.py` — 看 `ScriptedFakeModel` 如何驱动 Runtime 验证 tool-calling 循环与停止条件。
+18. `tests/test_policy_engine.py` / `tests/test_runtime_approval.py` — Stage 10 权限决策与审批暂停/恢复的测试。
