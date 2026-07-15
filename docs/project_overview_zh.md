@@ -269,8 +269,8 @@ flowchart TD
 ```
 financial_table_workflow_agent/
 ├── README.md
-├── DIRECTORY_GUIDE.md          # 目录职责说明
-├── requirements.txt            # 仅需 pandas
+├── CODE_STRUCTURE.md            # 代码结构与模块职责
+├── requirements.txt            # pandas + requests
 ├── .gitignore
 ├── data/real_market/           # 用户运行时下载的真实市场数据（不提交 Git）
 ├── test_data/real_market_sample/  # 小型真实测试 fixture（提交 Git，仅用于测试/最小演示）
