@@ -234,7 +234,7 @@ src/agent_runtime/openai_compatible_client.py   # OpenAICompatibleModelClient + 
 src/chat_agent.py                                # 自然语言 CLI（run_chat 可注入测试）
 prompts/financial_agent_system.md                # system prompt
 tests/test_openai_compatible_client.py           # 31 项适配器测试
-tests/test_chat_agent.py                          # 12 项 CLI 测试
+tests/test_chat_agent.py                          # CLI 测试（Stage 12 扩展至 21 项）
 docs/stage11_natural_language_demo.md            # 本文件
 .env.example                                      # 占位符配置（不提交真实 .env）
 ```
@@ -249,3 +249,21 @@ CODE_STRUCTURE.md                                 # Stage 11 结构说明
 
 未修改：`test_data/real_market_sample/` 真实 fixture、所有现有 CLI、
 Stage 9–10 的 102 项测试（行为不变；`event_callback` 默认 None，向后兼容）。
+
+---
+
+## 12. Stage 12 增量（自然语言抓取 + 中文报告）
+
+Stage 12 在 Stage 11 基础上扩展（详见
+`docs/stage12_natural_language_data_fetch_and_chinese_report.md`）：
+
+- **新增工具 `fetch_real_market_data`**（guarded）：模型从自然语言提取 tickers /
+  start_date / end_date，抓取真实 A 股数据到当前 run 的 `raw_data`，再走完整流程。
+- **`--input_dir` 改为可选**：模式 A（已有 CSV）/ 模式 B（自然语言抓取）。
+- **`--auto_approve_data_fetch` / `--tradingagents_path`** 新增 CLI 参数；审批按
+  `pending.tool_name` 分别授权（fetch / remediation 互不越权）。
+- **固定 Markdown 最终报告中文化**：`final_workflow_report.md` /
+  `final_workflow_one_page.md` 中文正文 + "数据来源与时间边界"章节。
+- **AgentContext 支持无 input_dir 启动**：`create_without_input_dir` + `set_input_dir`。
+- 测试扩展至 191 项（新增 `test_fetch_tool.py` 28 项 + `test_chinese_report.py` 9 项 +
+  `test_chat_agent.py` 9 项）。

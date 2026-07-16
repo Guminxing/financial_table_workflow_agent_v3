@@ -1,4 +1,4 @@
-"""Agent 工具包（Stage 9 MVP）。
+"""Agent 工具包（Stage 9 MVP + Stage 12 自然语言抓取）。
 
 把现有 PipelineRunner 阶段包装成领域工具，供 Agent Runtime 通过 ToolRegistry 调用。
 
@@ -14,12 +14,16 @@
 - manual_review_required 时必须设置 requires_user_action=True。
 - label_in_approved_features=True 时必须返回安全错误。
 - 每个写工具只允许写当前 run_root。
-- 不暴露 fetch_real_market_data（本轮不实现网络工具）。
+- Stage 12：``fetch_real_market_data`` 是唯一允许网络访问与工作区写入的抓取工具，
+  写入当前 run 的 ``run_root/raw_data/``，绝不覆盖 ``data/real_market``；不通过
+  subprocess 调 ``run_fetch_real_data.py``，直接复用 ``real_data_adapter`` 的
+  ``RealDataFetchConfig`` + ``fetch_real_data``；不生成合成数据。
 - 绝不生成合成数据。
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +82,319 @@ def _artifacts(ctx: AgentContext, paths: list[Path | str]) -> list[str]:
     return out
 
 
+def _require_runner(ctx: AgentContext) -> "Any | ToolResult":
+    """获取当前 run 的 runner；未 configure（含无 input_dir 启动状态）时返回
+    PRECONDITION_NOT_MET 的 ToolResult，而不是抛异常。
+
+    Stage 12：无 input_dir 启动状态下，profile/plan/prepare/validate 等工具在
+    configure 前调用应返回清晰的 PRECONDITION_NOT_MET，建议先 fetch 或 configure。
+    """
+    try:
+        return ctx.get_runner()
+    except RuntimeError:
+        if not ctx.has_input_dir():
+            return ToolResult.failure(
+                "input_dir is not configured for this run. In natural-language "
+                "fetch mode, call fetch_real_market_data then configure_workflow "
+                "first; in existing-CSV mode, pass --input_dir then configure_workflow. "
+                "Never falls back to fixture or synthetic data.",
+                code="PRECONDITION_NOT_MET",
+                status="precondition_not_met",
+                retryable=True,
+                metrics={"run_id": ctx.run_id},
+                next_actions=["fetch_real_market_data", "configure_workflow"],
+            )
+        return ToolResult.failure(
+            "PipelineRunner not configured for this run; call configure_workflow first.",
+            code="PRECONDITION_NOT_MET",
+            status="precondition_not_met",
+            retryable=True,
+            metrics={"run_id": ctx.run_id},
+            next_actions=["configure_workflow"],
+        )
+
+
+# ======================================================================
+# Stage 12：自然语言抓取真实数据工具
+# ======================================================================
+
+# A 股代码安全格式：6 位数字（可带 SH/SZ/BJ 前缀或 .SH/.SZ/.BJ 后缀）。
+# 工具层先做白名单校验，再交给 real_data_adapter 复用参考项目的 _normalize_ticker。
+_ASHARE_TICKER_RE = re.compile(r"^(SH|SZ|BJ)?[0-9]{6}(\.(SH|SZ|BJ))?$")
+
+# 日期格式 YYYY-MM-DD
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# 单次抓取 ticker 数量上限（防止模型意外发起超大抓取）
+MAX_FETCH_TICKERS = 20
+
+
+def _validate_fetch_tickers(tickers: Any) -> list[str]:
+    """校验模型传入的 tickers：必须是 list[str]，非空，每项为安全 A 股代码格式。
+
+    返回去空白后的 ticker 列表。非法时抛 ValueError（由 registry 转
+    INVALID_TOOL_ARGUMENTS）。
+    """
+    if not isinstance(tickers, list):
+        raise ValueError("tickers must be an array of strings")
+    if len(tickers) == 0:
+        raise ValueError("tickers must not be empty (minItems=1)")
+    if len(tickers) > MAX_FETCH_TICKERS:
+        raise ValueError(
+            f"too many tickers: {len(tickers)} > max {MAX_FETCH_TICKERS}; "
+            "reduce the request size to avoid accidental large fetches"
+        )
+    out: list[str] = []
+    seen: set[str] = set()
+    for t in tickers:
+        if not isinstance(t, str):
+            raise ValueError(f"ticker must be a string, got {type(t).__name__}")
+        s = t.strip()
+        if not s:
+            raise ValueError("ticker must not be empty")
+        if not _ASHARE_TICKER_RE.match(s):
+            raise ValueError(
+                f"invalid A-share ticker {s!r}: must be 6 digits "
+                "(optional SH/SZ/BJ prefix or .SH/.SZ/.BJ suffix)"
+            )
+        key = s.upper()
+        if key in seen:
+            # 去重，避免同一 ticker 重复抓取
+            continue
+        seen.add(key)
+        out.append(s)
+    return out
+
+
+def _validate_fetch_date(s: Any, field: str) -> str:
+    """校验日期格式 YYYY-MM-DD。"""
+    if not isinstance(s, str):
+        raise ValueError(f"{field} must be a string YYYY-MM-DD")
+    s = s.strip()
+    if not _DATE_RE.match(s):
+        raise ValueError(f"{field} must be YYYY-MM-DD, got {s!r}")
+    # 进一步校验是真实日历日期
+    from datetime import datetime
+
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError(f"{field} is not a valid calendar date: {s!r}") from exc
+    return s
+
+
+def _tool_fetch_real_market_data(
+    arguments: dict[str, Any], context: Any
+) -> ToolResult:
+    """fetch_real_market_data：自然语言抓取真实 A 股数据（Stage 12）。
+
+    职责：
+    1. 从模型传入的结构化参数读取 tickers / start_date / end_date /
+       snapshot_fundamentals（默认 False）。
+    2. 校验 A 股代码（6 位数字，可带交易所前后缀）、日期格式、start<=end、
+       ticker 数量上限（默认 20）。
+    3. 调用 real_data_adapter.RealDataFetchConfig + fetch_real_data（不复制抓取实现，
+       不通过 subprocess 调 run_fetch_real_data.py）。
+    4. 抓取产物写入当前 run 的 ``run_root/raw_data/``（路径边界检查，禁止路径穿越，
+       禁止写出 run_root；绝不覆盖 data/real_market）。
+    5. 抓取成功后把 AgentContext.input_dir 更新为该 run 的 raw_data。
+    6. 全部 ticker 失败或 price.csv 为空时返回结构化失败；部分失败时保留成功结果
+       并在 warnings / errors 中记录失败 ticker。
+    7. 返回结构化 ToolResult，含 requested/resolved/rows_by_ticker/summary_rows/
+       warnings/errors/五张 CSV 路径/fetch_metadata.json 路径/next_actions=
+       [configure_workflow]。
+
+    risk_level=GUARDED（涉及网络访问与工作区写入，默认 ASK 审批）。
+    不修改 TradingAgents-astock-main；不生成合成数据；不把当前基本面快照回填到
+    历史日期。
+    """
+    import json as _json
+
+    from real_data_adapter import (
+        RealDataFetchConfig,
+        fetch_real_data,
+        resolve_tradingagents_path,
+    )
+
+    ctx: AgentContext = context
+
+    # 1. 参数校验（白名单格式，不依赖参考项目）
+    try:
+        tickers = _validate_fetch_tickers(arguments.get("tickers"))
+    except ValueError as exc:
+        return ToolResult.failure(
+            f"invalid tickers: {exc}",
+            code="INVALID_TOOL_ARGUMENTS",
+            status="invalid_arguments",
+            retryable=True,
+            next_actions=["fetch_real_market_data"],
+        )
+    try:
+        start_date = _validate_fetch_date(arguments.get("start_date"), "start_date")
+        end_date = _validate_fetch_date(arguments.get("end_date"), "end_date")
+    except ValueError as exc:
+        return ToolResult.failure(
+            f"invalid date: {exc}",
+            code="INVALID_TOOL_ARGUMENTS",
+            status="invalid_arguments",
+            retryable=True,
+            next_actions=["fetch_real_market_data"],
+        )
+    if start_date > end_date:
+        return ToolResult.failure(
+            f"start_date {start_date} must be <= end_date {end_date}",
+            code="INVALID_TOOL_ARGUMENTS",
+            status="invalid_arguments",
+            retryable=True,
+            next_actions=["fetch_real_market_data"],
+        )
+
+    snapshot_fundamentals_arg = arguments.get("snapshot_fundamentals", False)
+    if not isinstance(snapshot_fundamentals_arg, bool):
+        return ToolResult.failure(
+            "snapshot_fundamentals must be a boolean",
+            code="INVALID_TOOL_ARGUMENTS",
+            status="invalid_arguments",
+            retryable=True,
+            next_actions=["fetch_real_market_data"],
+        )
+    snapshot_fundamentals = bool(snapshot_fundamentals_arg)
+
+    # 2. 解析参考项目路径（受控配置，LLM 不能从自然语言任意指定本地路径）
+    #    优先级：AgentContext.tradingagents_path（CLI --tradingagents_path）>
+    #    环境变量 TRADINGAGENTS_ASTOCK_PATH > 默认 > 相对。
+    ta_path = resolve_tradingagents_path(ctx.tradingagents_path)
+
+    # 3. 抓取产物写入当前 run 的 raw_data（路径边界检查）
+    raw_data_dir = ctx.ensure_path_in_run_root(ctx.run_root / "raw_data")
+    raw_data_dir.mkdir(parents=True, exist_ok=True)
+
+    config = RealDataFetchConfig(
+        tickers=tickers,
+        start_date=start_date,
+        end_date=end_date,
+        output_dir=raw_data_dir,
+        tradingagents_path=ta_path,
+        snapshot_fundamentals=snapshot_fundamentals,
+    )
+
+    try:
+        metadata = fetch_real_data(config)
+    except Exception as exc:  # noqa: BLE001
+        return ToolResult.failure(
+            f"fetch_real_data failed: {type(exc).__name__}: {exc}",
+            code="TOOL_EXECUTION_ERROR",
+            status="failed",
+            retryable=False,
+            metrics={
+                "requested_tickers": tickers,
+                "start_date": start_date,
+                "end_date": end_date,
+                "snapshot_fundamentals_enabled": snapshot_fundamentals,
+            },
+            next_actions=["fetch_real_market_data"],
+        )
+
+    summary_rows = metadata.get("summary_rows", {})
+    rows_by_ticker = metadata.get("rows_by_ticker", {})
+    errors = metadata.get("errors", [])
+    warnings = metadata.get("warnings", [])
+    resolved_tickers = metadata.get("resolved_tickers", [])
+    price_rows = int(summary_rows.get("price", 0))
+
+    # 4. 全部失败 / price.csv 为空 → 结构化失败（不更新 input_dir）
+    #    注意：errors 非空只代表"有 ticker 失败"；只要还有成功 ticker（price_rows>0）
+    #    就属于部分失败，应继续并记录 warning（见下）。只有 price_rows==0（全部失败
+    #    或 price.csv 为空）才返回结构化失败。
+    if price_rows == 0:
+        return ToolResult.failure(
+            "fetch produced no usable price data (all tickers failed or "
+            "price.csv empty); not configuring workflow.",
+            code="FETCH_NO_USABLE_DATA",
+            status="failed",
+            retryable=False,
+            metrics={
+                "requested_tickers": tickers,
+                "resolved_tickers": resolved_tickers,
+                "rows_by_ticker": rows_by_ticker,
+                "summary_rows": summary_rows,
+                "warnings": warnings,
+                "errors": errors,
+                "snapshot_fundamentals_enabled": snapshot_fundamentals,
+            },
+            artifacts=_artifacts(ctx, [raw_data_dir / "fetch_metadata.json"]),
+            next_actions=["fetch_real_market_data"],
+        )
+
+    # 5. 部分失败：保留成功结果，warnings 记录失败 ticker
+    failed_tickers = sorted(
+        {k for k, v in (metadata.get("per_ticker_errors", {}) or {}).items()}
+    )
+    successful_tickers = [
+        t for t in resolved_tickers if t not in failed_tickers
+    ]
+    if failed_tickers:
+        warnings = list(warnings) + [
+            f"partial fetch: {len(failed_tickers)} ticker(s) failed: "
+            f"{failed_tickers}; continuing with {len(successful_tickers)} "
+            f"successful ticker(s): {successful_tickers}"
+        ]
+
+    # 6. 抓取成功 → 更新 AgentContext.input_dir 为当前 run 的 raw_data
+    #    （set_input_dir 会再次校验五张 CSV 齐全 + 路径边界）
+    try:
+        ctx.set_input_dir(raw_data_dir)
+    except (ValueError, Exception) as exc:  # noqa: BLE001
+        return ToolResult.failure(
+            f"fetch succeeded but input_dir update failed: "
+            f"{type(exc).__name__}: {exc}",
+            code="TOOL_EXECUTION_ERROR",
+            status="failed",
+            retryable=False,
+            metrics={
+                "requested_tickers": tickers,
+                "resolved_tickers": resolved_tickers,
+                "rows_by_ticker": rows_by_ticker,
+                "summary_rows": summary_rows,
+            },
+            artifacts=_artifacts(ctx, [raw_data_dir / "fetch_metadata.json"]),
+            next_actions=["fetch_real_market_data"],
+        )
+
+    # 7. 结构化 ToolResult
+    csv_paths = metadata.get("output_files", {})
+    artifact_paths: list[Path | str] = [raw_data_dir / "fetch_metadata.json"]
+    for key in ("price", "volume", "fundamentals", "industry", "calendar"):
+        p = csv_paths.get(key)
+        if p:
+            artifact_paths.append(Path(p))
+
+    return ToolResult.success(
+        f"fetched {len(successful_tickers)}/{len(tickers)} ticker(s) "
+        f"({start_date} ~ {end_date}); price rows={price_rows}; "
+        f"input_dir updated to run raw_data",
+        status="completed",
+        metrics={
+            "requested_tickers": tickers,
+            "resolved_tickers": resolved_tickers,
+            "successful_tickers": successful_tickers,
+            "failed_tickers": failed_tickers,
+            "rows_by_ticker": rows_by_ticker,
+            "summary_rows": summary_rows,
+            "warnings": warnings,
+            "errors": errors,
+            "snapshot_fundamentals_enabled": snapshot_fundamentals,
+            "fundamentals_limitation": metadata.get("fundamentals_limitation"),
+            "fetch_date": metadata.get("fetch_date"),
+            "ohlcv_source_by_ticker": metadata.get("ohlcv_source_by_ticker"),
+            "input_dir": str(ctx.input_dir).replace("\\", "/"),
+            "tradingagents_path": str(ta_path).replace("\\", "/"),
+        },
+        artifacts=_artifacts(ctx, artifact_paths),
+        next_actions=["configure_workflow"],
+    )
+
+
 # ======================================================================
 # 工具实现
 # ======================================================================
@@ -87,6 +404,9 @@ def _tool_configure_workflow(arguments: dict[str, Any], context: Any) -> ToolRes
     """configure_workflow：校验输入目录 + 更新 AgentContext + 创建当前 run 的 runner。
 
     不执行 pipeline；不生成模拟数据。
+
+    Stage 12：input_dir 未配置时（自然语言抓取模式尚未 fetch）明确失败，建议
+    先调用 fetch_real_market_data；绝不静默回退到 fixture 或合成数据。
     """
     ctx: AgentContext = context
     input_dir = arguments.get("input_dir")
@@ -94,14 +414,49 @@ def _tool_configure_workflow(arguments: dict[str, Any], context: Any) -> ToolRes
         # 允许在 configure 时切换 input_dir（会重新校验，绝不回退合成数据）
         from agent_runtime.context import validate_input_dir
 
-        ctx.input_dir = validate_input_dir(input_dir)
+        try:
+            ctx.input_dir = validate_input_dir(input_dir)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult.failure(
+                f"configure_workflow: invalid input_dir: {exc}",
+                code="INVALID_TOOL_ARGUMENTS",
+                status="invalid_arguments",
+                retryable=True,
+                metrics={"run_id": ctx.run_id},
+                next_actions=["fetch_real_market_data", "configure_workflow"],
+            )
+    else:
+        # 未显式传 input_dir：若 ctx 也没有（自然语言抓取模式尚未 fetch）→ 明确失败
+        if not ctx.has_input_dir():
+            return ToolResult.failure(
+                "configure_workflow: input_dir is not configured. In natural-language "
+                "fetch mode, call fetch_real_market_data first to fetch real market "
+                "data into this run's raw_data; in existing-CSV mode, pass --input_dir. "
+                "Never falls back to fixture or synthetic data.",
+                code="PRECONDITION_NOT_MET",
+                status="precondition_not_met",
+                retryable=True,
+                metrics={"run_id": ctx.run_id},
+                next_actions=["fetch_real_market_data"],
+            )
 
-    runner = ctx.configure_runner(
-        analysis_goal=arguments.get("analysis_goal", ...),
-        auto_repair=arguments.get("auto_repair", ...),
-        max_repair_rounds=arguments.get("max_repair_rounds", ...),
-        max_row_loss_ratio=arguments.get("max_row_loss_ratio", ...),
-    )
+    try:
+        runner = ctx.configure_runner(
+            analysis_goal=arguments.get("analysis_goal", ...),
+            auto_repair=arguments.get("auto_repair", ...),
+            max_repair_rounds=arguments.get("max_repair_rounds", ...),
+            max_row_loss_ratio=arguments.get("max_row_loss_ratio", ...),
+        )
+    except RuntimeError as exc:
+        # configure_runner 在 input_dir 缺失时抛 RuntimeError → 转 PRECONDITION_NOT_MET
+        return ToolResult.failure(
+            f"configure_workflow: {exc}",
+            code="PRECONDITION_NOT_MET",
+            status="precondition_not_met",
+            retryable=True,
+            metrics={"run_id": ctx.run_id},
+            next_actions=["fetch_real_market_data"],
+        )
     return ToolResult.success(
         f"workflow configured for run_id={ctx.run_id}; runner output_root={ctx.run_root}",
         status="configured",
@@ -201,7 +556,9 @@ def _tool_profile_financial_data(
 ) -> ToolResult:
     """profile_financial_data：Stage 1 Data Profiler。"""
     ctx: AgentContext = context
-    runner = ctx.get_runner()
+    runner = _require_runner(ctx)
+    if isinstance(runner, ToolResult):
+        return runner
     runner.run_profile()
     summ = runner.stages["profile"]["summary"]
     result = ToolResult.success(
@@ -224,7 +581,9 @@ def _tool_create_workflow_plan(
 ) -> ToolResult:
     """create_workflow_plan：Stage 2 Workflow Planner。"""
     ctx: AgentContext = context
-    runner = ctx.get_runner()
+    runner = _require_runner(ctx)
+    if isinstance(runner, ToolResult):
+        return runner
     runner.run_planner()
     summ = runner.stages["planner"]["summary"]
     result = ToolResult.success(
@@ -247,7 +606,9 @@ def _tool_prepare_financial_panel(
 ) -> ToolResult:
     """prepare_financial_panel：Stage 3 Code Executor。"""
     ctx: AgentContext = context
-    runner = ctx.get_runner()
+    runner = _require_runner(ctx)
+    if isinstance(runner, ToolResult):
+        return runner
     runner.run_executor()
     summ = runner.stages["executor"]["summary"]
     result = ToolResult.success(
@@ -275,7 +636,9 @@ def _tool_validate_financial_panel(
 ) -> ToolResult:
     """validate_financial_panel：Stage 4 initial Validity Critic。"""
     ctx: AgentContext = context
-    runner = ctx.get_runner()
+    runner = _require_runner(ctx)
+    if isinstance(runner, ToolResult):
+        return runner
     runner.run_initial_critic()
     summ = runner.stages["initial_critic"]["summary"]
     overall = summ.get("overall_status", "unknown")
@@ -317,7 +680,9 @@ def _tool_run_safe_remediation(
     - 不重写修复策略；不绕过现有安全门。
     """
     ctx: AgentContext = context
-    runner = ctx.get_runner()
+    runner = _require_runner(ctx)
+    if isinstance(runner, ToolResult):
+        return runner
 
     # 前置：initial critic 必须已运行
     init_rec = runner.stages.get("initial_critic", {})
@@ -427,7 +792,9 @@ def _tool_validate_repaired_panel(
 ) -> ToolResult:
     """validate_repaired_panel：Stage 6 对 repaired panel 重新运行 Critic。"""
     ctx: AgentContext = context
-    runner = ctx.get_runner()
+    runner = _require_runner(ctx)
+    if isinstance(runner, ToolResult):
+        return runner
     runner.run_repaired_critic()
     summ = runner.stages["repaired_critic"]["summary"]
     overall = summ.get("overall_status", "unknown")
@@ -459,7 +826,9 @@ def _tool_generate_workflow_report(
 ) -> ToolResult:
     """generate_workflow_report：Stage 7 Final Report Generator。"""
     ctx: AgentContext = context
-    runner = ctx.get_runner()
+    runner = _require_runner(ctx)
+    if isinstance(runner, ToolResult):
+        return runner
     runner.run_final_report()
     summ = runner.stages["final_report"]["summary"]
     result = ToolResult.success(
@@ -497,7 +866,9 @@ def _tool_inspect_validation_failures(
     import json
 
     ctx: AgentContext = context
-    runner = ctx.get_runner()
+    runner = _require_runner(ctx)
+    if isinstance(runner, ToolResult):
+        return runner
     # 优先复审报告，其次初始报告
     report_path = (
         runner.final_validation_json
@@ -584,16 +955,60 @@ CONFIGURE_SCHEMA: dict[str, Any] = {
 
 EMPTY_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
 
+# Stage 12：自然语言抓取真实数据工具的输入 schema。
+# 注意：registry 的基础 schema 校验不支持 minItems/maxItems/minimum 等高级关键字，
+# 这些约束在 _validate_fetch_tickers / _validate_fetch_date 中以代码实现。
+FETCH_REAL_MARKET_DATA_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "tickers": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "start_date": {"type": "string"},
+        "end_date": {"type": "string"},
+        "snapshot_fundamentals": {"type": "boolean"},
+    },
+    "required": ["tickers", "start_date", "end_date"],
+}
+
 
 def build_default_registry_specs() -> list[ToolSpec]:
-    """返回 10 个领域工具的 ToolSpec 列表（按 pipeline 顺序）。"""
+    """返回 11 个领域工具的 ToolSpec 列表（按 pipeline 顺序）。
+
+    Stage 12：新增 ``fetch_real_market_data``（guarded），位于 configure_workflow
+    之前，支持"自然语言抓取真实数据 → configure → profile → ... → report"流程。
+    """
     return [
+        ToolSpec(
+            name="fetch_real_market_data",
+            description=(
+                "Stage 0 (natural-language fetch): fetch real A-share market data "
+                "(price/volume/fundamentals/industry/calendar) for the given tickers "
+                "and date range into this run's raw_data, then set it as the run "
+                "input_dir. Extract tickers/start_date/end_date from the user's "
+                "natural-language request; do NOT guess missing parameters. "
+                "Validates A-share ticker format (6 digits), YYYY-MM-DD dates, "
+                "start<=end, and a max of 20 tickers. snapshot_fundamentals defaults "
+                "to false (current PE/PB/ROE snapshot is NOT historical point-in-time; "
+                "never backfilled into historical dates). Writes only to the current "
+                "run_root/raw_data; never overwrites data/real_market. "
+                "On full failure returns a structured error; on partial failure keeps "
+                "successful tickers and reports warnings. Next: configure_workflow."
+            ),
+            input_schema=FETCH_REAL_MARKET_DATA_SCHEMA,
+            risk_level=RiskLevel.GUARDED,
+            handler=_tool_fetch_real_market_data,
+        ),
         ToolSpec(
             name="configure_workflow",
             description=(
                 "Validate the real-market input directory, update the AgentContext, "
                 "and create a PipelineRunner isolated to the current run_id. "
-                "Does NOT run the pipeline. Does NOT generate synthetic data."
+                "Does NOT run the pipeline. Does NOT generate synthetic data. "
+                "In natural-language fetch mode, call fetch_real_market_data first; "
+                "configure_workflow fails with PRECONDITION_NOT_MET if input_dir is "
+                "not configured."
             ),
             input_schema=CONFIGURE_SCHEMA,
             risk_level=RiskLevel.WORKSPACE_WRITE,
@@ -677,7 +1092,7 @@ def build_default_registry_specs() -> list[ToolSpec]:
 
 
 def build_default_registry():
-    """构造并返回装满 10 个领域工具的 ToolRegistry。"""
+    """构造并返回装满 11 个领域工具的 ToolRegistry。"""
     from agent_runtime.registry import build_registry
 
     return build_registry(build_default_registry_specs())

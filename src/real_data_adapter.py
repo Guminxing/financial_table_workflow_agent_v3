@@ -495,6 +495,7 @@ def fetch_real_data(config: RealDataFetchConfig) -> dict[str, Any]:
         "resolved_tickers": resolved_tickers,
         "start_date": config.start_date,
         "end_date": config.end_date,
+        "snapshot_fundamentals_enabled": bool(config.snapshot_fundamentals),
         "ohlcv_source_by_ticker": ohlcv_source_by_ticker,
         "rows_by_ticker": rows_by_ticker,
         "per_ticker_errors": {k: v for k, v in config.per_ticker_errors.items()},

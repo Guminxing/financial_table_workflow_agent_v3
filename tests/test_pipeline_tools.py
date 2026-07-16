@@ -123,10 +123,11 @@ class TestPipelineTools(unittest.TestCase):
 
     # C6. stage 失败转换为 ToolResult.ok=False
     def test_stage_failure_converts_to_ok_false(self):
-        # 不 configure 直接 profile → runner 未创建 → handler 抛 RuntimeError → TOOL_EXECUTION_ERROR
+        # 不 configure 直接 profile → runner 未创建 → 现在返回 PRECONDITION_NOT_MET
+        # （Stage 12：无 input_dir / 未 configure 时不再抛 RuntimeError，而是结构化失败）
         result = _exec(self.registry, "profile_financial_data", self.ctx, {})
         self.assertFalse(result.ok)
-        self.assertEqual(result.error.code, "TOOL_EXECUTION_ERROR")
+        self.assertEqual(result.error.code, "PRECONDITION_NOT_MET")
 
     # C7. status 工具只读取当前 run
     def test_status_reads_current_run_only(self):

@@ -165,8 +165,28 @@ OHLCV 严格按 `start_date ~ end_date` 过滤；按 (date, ticker) 去重（kee
 
 ---
 
-## 11. 下一阶段计划
+## 11. Stage 12：作为 Agent 工具复用
 
-- 真实数据源已接入（当前阶段完成）。
+Stage 12 把本适配器包装成 Agent 领域工具 `fetch_real_market_data`（见
+`src/agent_tools/pipeline_tools.py`），让自然语言 Agent 能"先抓取再 configure"：
+
+- 工具直接复用 `RealDataFetchConfig` + `fetch_real_data`，**不复制抓取实现，不通过
+  subprocess 调 `run_fetch_real_data.py`**。
+- 抓取产物写入当前 run 的 `run_root/raw_data/`（路径边界检查，绝不覆盖
+  `data/real_market`）；`fetch_metadata.json` 含 `snapshot_fundamentals_enabled` 字段。
+- 工具校验 A 股代码（6 位数字）、日期格式、`start<=end`、ticker 数量上限（20），
+  默认 `snapshot_fundamentals=false`。
+- risk level = `guarded`（默认 ASK 审批）；`--auto_approve_data_fetch` 只自动批准
+  此工具。
+- TradingAgents 路径由 CLI `--tradingagents_path` / 环境变量 / 默认解析，存入
+  `AgentContext.tradingagents_path`，LLM 不能从自然语言任意指定。
+
+详见 `docs/stage12_natural_language_data_fetch_and_chinese_report.md`。
+
+---
+
+## 12. 下一阶段计划
+
+- 真实数据源已接入（当前阶段完成）；Stage 12 已将其暴露为自然语言 Agent 工具。
 - Multi Planner Voting / LLM Planner/Critic/Repair / baseline comparison 仍为后续阶段。
 - 当前阶段**不训练模型、不输出投资建议、不连接真实券商交易系统、不做 Streamlit、不做多 Agent 投票**。

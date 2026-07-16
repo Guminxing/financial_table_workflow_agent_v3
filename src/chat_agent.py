@@ -1,4 +1,4 @@
-"""Natural Language Agent CLI（Stage 11 Demo）。
+"""Natural Language Agent CLI (Stage 11 Demo + Stage 12 natural-language fetch).
 
 把"自然语言 → 真实 LLM → 自主工具调用 → 报告"的完整闭环暴露给终端用户。
 
@@ -8,16 +8,35 @@
     → OpenAICompatibleModelClient（真实 LLM，OpenAI-compatible tool calling）
     → AgentRuntime（有界 tool-calling 循环 + 重复检测）
     → PolicyEngine（执行前 allow/ask/deny；guarded→ASK）
-    → ToolRegistry → PipelineRunner 领域工具
+    → ToolRegistry → PipelineRunner 领域工具（含 fetch_real_market_data）
     → ToolResult 回填模型上下文
     → 模型继续或输出最终自然语言总结
 
+两种模式（Stage 12）：
+
+- **模式 A（已有 CSV）**：用户传 ``--input_dir``，Agent 直接 configure → profile →
+  ... → report。
+- **模式 B（自然语言抓取）**：用户不传 ``--input_dir``，Agent 从自然语言提取
+  tickers / start_date / end_date，先调 ``fetch_real_market_data`` 抓取真实数据到
+  当前 run 的 raw_data，再 configure → profile → ... → report。
+
 用法（PowerShell，从项目根目录运行）::
 
+    # 模式 A：处理已有 CSV
     python -B src/chat_agent.py `
       --input_dir test_data/real_market_sample `
-      --output_base outputs_real `
-      --prompt "检查这些真实市场数据，生成建模宽表，必要时安全修复并输出报告"
+      --output_base outputs_agent `
+      --prompt "检查已有数据并生成中文报告" `
+      --auto_approve_remediation
+
+    # 模式 B：自然语言自动抓取
+    python -B src/chat_agent.py `
+      --output_base outputs_agent `
+      --tradingagents_path ..\\TradingAgents-astock-main `
+      --max_tool_turns 20 `
+      --prompt "获取贵州茅台600519和平安银行000001从2024年1月1日至2024年6月30日的真实市场数据..." `
+      --auto_approve_data_fetch `
+      --auto_approve_remediation
 
 环境变量（API Key 只从环境变量读取，不写入日志/事件/错误信息）::
 
@@ -29,6 +48,10 @@
 - CLI 只通过 AgentRuntime 调用工具，绝不直接调 PipelineRunner。
 - 不打印完整 messages / 隐藏推理 / API Key。
 - 审批只决定"是否执行"，执行仍走 PipelineRunner → Remediation Agent，不绕过安全门。
+- ``--auto_approve_data_fetch`` 只自动批准 ``fetch_real_market_data``；
+  ``--auto_approve_remediation`` 只自动批准 ``run_safe_remediation``；两者互不越权。
+- TradingAgents 路径由 CLI ``--tradingagents_path`` / 环境变量 / 默认解析，LLM 不能
+  从自然语言任意指定本地路径。
 - 本阶段 session 只存在进程内，不实现跨进程持久化。
 - 不把 Demo 描述成生产级系统。
 """
@@ -68,19 +91,32 @@ DEFAULT_SYSTEM_PROMPT = "prompts/financial_agent_system.md"
 # 工具调用进度行宽（左对齐工具名）
 _TOOL_NAME_WIDTH = 28
 
+# guarded 工具名 → 对应的自动批准 CLI flag（Stage 12：按工具名分别授权）
+_AUTO_APPROVE_TOOL_MAP: dict[str, str] = {
+    "fetch_real_market_data": "auto_approve_data_fetch",
+    "run_safe_remediation": "auto_approve_remediation",
+}
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """解析 CLI 参数。"""
     p = argparse.ArgumentParser(
         description=(
-            "Natural-language Financial Table Workflow Agent (Stage 11 demo). "
-            "Drives the Pipeline via a real OpenAI-compatible LLM."
+            "Natural-language Financial Table Workflow Agent (Stage 11+12 demo). "
+            "Drives the Pipeline via a real OpenAI-compatible LLM. "
+            "Mode A: pass --input_dir to process existing CSVs. "
+            "Mode B: omit --input_dir and let the model fetch real data via "
+            "fetch_real_market_data (requires --auto_approve_data_fetch or interactive "
+            "approval)."
         ),
     )
     p.add_argument(
         "--input_dir",
-        default="test_data/real_market_sample",
-        help="Directory with real market CSVs (default: test_data/real_market_sample).",
+        default=None,
+        help="Directory with real market CSVs (Mode A). If omitted (Mode B), the "
+        "model fetches real data via fetch_real_market_data into this run's "
+        "raw_data; the model must extract tickers/start_date/end_date from the "
+        "prompt and the user must approve the fetch.",
     )
     p.add_argument(
         "--output_base",
@@ -91,7 +127,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--run_id",
         default=None,
-        help="Run id (default: auto-generated run_<timestamp>_<short>).",
+        help="Run id (default: auto-generated run_<short>).",
     )
     p.add_argument(
         "--prompt",
@@ -112,13 +148,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--max_tool_turns",
         type=int,
         default=12,
-        help="Max model tool-calling turns (default: 12).",
+        help="Max model tool-calling turns (default: 12). Mode B fetch chain needs "
+        "more turns; consider --max_tool_turns 20.",
     )
     p.add_argument(
         "--auto_approve_remediation",
         action="store_true",
-        help="Auto-approve guarded remediation (run_safe_remediation) for live demo. "
-        "Execution still respects internal safety gates.",
+        help="Auto-approve guarded remediation (run_safe_remediation) ONLY. "
+        "Does NOT auto-approve fetch_real_market_data. Execution still respects "
+        "internal safety gates.",
+    )
+    p.add_argument(
+        "--auto_approve_data_fetch",
+        action="store_true",
+        help="Auto-approve guarded real-data fetch (fetch_real_market_data) ONLY. "
+        "Does NOT auto-approve run_safe_remediation. Fetch still writes only to "
+        "the current run's raw_data and respects ticker/date validation.",
     )
     p.add_argument(
         "--max_repair_rounds",
@@ -137,14 +182,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Optional downstream analysis goal passed to the planner.",
     )
+    p.add_argument(
+        "--tradingagents_path",
+        default=None,
+        help="Path to TradingAgents-astock-main (Mode B). Priority: this flag > "
+        "env TRADINGAGENTS_ASTOCK_PATH > default > relative. The LLM cannot set "
+        "this from natural language.",
+    )
     return p.parse_args(argv)
 
 
 def _new_run_id() -> str:
-    """生成 run_id（run_<timestamp>_<short>）。"""
+    """生成 run_id（run_<short>）。"""
     # 不依赖墙钟业务语义；仅用于目录隔离。uuid 提供唯一性。
     short = uuid.uuid4().hex[:8]
-    # 用一个稳定可读前缀；时间戳由调用环境保证，这里只用 uuid 保证唯一。
     return f"run_{short}"
 
 
@@ -196,8 +247,8 @@ def _resolve_policy() -> PolicyEngine:
     """构造 PolicyEngine。
 
     本阶段始终用默认策略（read/workspace_write→ALLOW，guarded→ASK，未知→DENY）。
-    ``--auto_approve_remediation`` 不改策略，而是在 CLI 层对待审批请求自动回复 approved
-    （仍走 ASK 门，执行仍受内部安全门约束）。
+    ``--auto_approve_*`` 不改策略，而是在 CLI 层对待审批请求按工具名自动回复
+    approved（仍走 ASK 门，执行仍受内部安全门约束）。
     """
     return PolicyEngine()
 
@@ -217,15 +268,37 @@ def _build_model_client(args: argparse.Namespace, workspace_root: Path):
     )
 
 
+def _should_auto_approve(
+    tool_name: str,
+    *,
+    auto_approve_data_fetch: bool,
+    auto_approve_remediation: bool,
+) -> bool:
+    """根据 pending.tool_name 决定是否自动批准（Stage 12：按工具名分别授权）。
+
+    - ``fetch_real_market_data`` → 仅当 ``--auto_approve_data_fetch`` 时自动批准。
+    - ``run_safe_remediation`` → 仅当 ``--auto_approve_remediation`` 时自动批准。
+    - 其他 guarded 工具 → 不自动批准（交互式 y/N）。
+    - 两个 flag 互不越权：``--auto_approve_remediation`` 不会自动批准 fetch，
+      ``--auto_approve_data_fetch`` 不会自动批准 remediation。
+    """
+    if tool_name == "fetch_real_market_data":
+        return bool(auto_approve_data_fetch)
+    if tool_name == "run_safe_remediation":
+        return bool(auto_approve_remediation)
+    return False
+
+
 def _handle_approval(
     runtime: AgentRuntime,
     result,
     *,
-    auto_approve: bool,
+    auto_approve_data_fetch: bool,
+    auto_approve_remediation: bool,
     input_fn: Callable[[str], str],
     output_fn: Callable[[str], None],
 ) -> object:
-    """处理 awaiting_approval：交互式 approve/reject 或 auto-approve。
+    """处理 awaiting_approval：交互式 approve/reject 或按工具名 auto-approve。
 
     返回 resume 后的 AgentRunResult。
     """
@@ -236,8 +309,14 @@ def _handle_approval(
     output_fn("Agent requests:")
     output_fn(f"  {pending.tool_name}")
     output_fn(f"  arguments: {pending.arguments}")
-    if auto_approve:
-        output_fn("  (auto-approved via --auto_approve_remediation)")
+    auto = _should_auto_approve(
+        pending.tool_name,
+        auto_approve_data_fetch=auto_approve_data_fetch,
+        auto_approve_remediation=auto_approve_remediation,
+    )
+    if auto:
+        flag_name = _AUTO_APPROVE_TOOL_MAP.get(pending.tool_name, "?")
+        output_fn(f"  (auto-approved via --{flag_name})")
         approved = True
     else:
         # 提示行经 output_fn 输出（便于捕获/重定向），再用 input_fn 读取回答
@@ -246,6 +325,48 @@ def _handle_approval(
         approved = ans in ("y", "yes")
     resp = ApprovalResponse(request_id=pending.request_id, approved=approved)
     return runtime.resume(resp)
+
+
+def _build_context(
+    args: argparse.Namespace,
+    workspace_root: Path,
+    run_id: str,
+) -> AgentContext:
+    """根据是否传 --input_dir 构造 AgentContext（Stage 12 双模式）。
+
+    - 传了 ``--input_dir``（模式 A）：用 ``AgentContext.create``，校验五张 CSV。
+    - 没传（模式 B）：用 ``AgentContext.create_without_input_dir``，允许"先抓取再
+      configure"；tradingagents_path 解析后存入 context 供 fetch 工具受控使用。
+    """
+    # 解析 TradingAgents 路径（CLI > 环境变量 > 默认 > 相对）；LLM 不能任意指定。
+    ta_path = None
+    if args.input_dir is None or args.tradingagents_path is not None:
+        from real_data_adapter import resolve_tradingagents_path
+
+        ta_path = resolve_tradingagents_path(args.tradingagents_path)
+
+    if args.input_dir is not None:
+        # 模式 A：已有 CSV
+        return AgentContext.create(
+            workspace_root=workspace_root,
+            input_dir=args.input_dir,
+            output_base=args.output_base,
+            run_id=run_id,
+            analysis_goal=args.analysis_goal,
+            max_repair_rounds=args.max_repair_rounds,
+            max_row_loss_ratio=args.max_row_loss_ratio,
+            tradingagents_path=ta_path,
+        )
+    # 模式 B：自然语言抓取（先无 input_dir 启动）
+    return AgentContext.create_without_input_dir(
+        workspace_root=workspace_root,
+        output_base=args.output_base,
+        run_id=run_id,
+        analysis_goal=args.analysis_goal,
+        max_repair_rounds=args.max_repair_rounds,
+        max_row_loss_ratio=args.max_row_loss_ratio,
+        tradingagents_path=ta_path,
+    )
 
 
 def run_chat(
@@ -267,25 +388,22 @@ def run_chat(
     output_fn("Financial Table Workflow Agent")
     output_fn("")
     output_fn(f"Run: {run_id}")
-    output_fn(f"Input: {args.input_dir}")
+    if args.input_dir is not None:
+        output_fn(f"Input: {args.input_dir}  (mode A: existing CSVs)")
+    else:
+        output_fn("Input: (none; mode B: model will fetch real data)")
+    if args.tradingagents_path:
+        output_fn(f"TradingAgents path: {args.tradingagents_path}")
     output_fn("")
 
-    # 1. AgentContext（校验 input_dir，绝不回退合成数据）
+    # 1. AgentContext（模式 A 校验 input_dir；模式 B 无 input_dir 启动；绝不回退合成数据）
     try:
-        ctx = AgentContext.create(
-            workspace_root=workspace_root,
-            input_dir=args.input_dir,
-            output_base=args.output_base,
-            run_id=run_id,
-            analysis_goal=args.analysis_goal,
-            max_repair_rounds=args.max_repair_rounds,
-            max_row_loss_ratio=args.max_row_loss_ratio,
-        )
+        ctx = _build_context(args, workspace_root, run_id)
     except Exception as exc:  # noqa: BLE001
         output_fn(f"[chat_agent] invalid input: {exc}")
         return 1
 
-    # 2. ToolRegistry（10 个领域工具）
+    # 2. ToolRegistry（11 个领域工具，含 fetch_real_market_data）
     registry = build_default_registry()
 
     # 3. PolicyEngine（默认策略：guarded→ASK）
@@ -339,12 +457,13 @@ def run_chat(
         output_fn(f"[chat_agent] runtime error: {type(exc).__name__}: {exc}")
         return 1
 
-    # 8. 处理 awaiting_approval（可能多次）
+    # 8. 处理 awaiting_approval（可能多次；按工具名分别授权）
     while result.stop_reason == StopReason.AWAITING_APPROVAL:
         result = _handle_approval(
             runtime,
             result,
-            auto_approve=args.auto_approve_remediation,
+            auto_approve_data_fetch=args.auto_approve_data_fetch,
+            auto_approve_remediation=args.auto_approve_remediation,
             input_fn=input_fn,
             output_fn=output_fn,
         )

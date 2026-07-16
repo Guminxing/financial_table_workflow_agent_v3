@@ -25,12 +25,17 @@
 - 确定性的金融数据处理 Pipeline（剖析 → 规划 → 执行 → 审查 → 修复 → 复审 → 报告）
 - Agent Runtime 有界工具调用循环（`max_tool_turns` + 重复检测双保险）
 - Tool Registry 与结构化 `ToolResult`（摘要 / 指标 / 产物路径 / 下一步建议）
-- 10 个金融工作流领域工具（见 [§5](#5-领域工具)）
+- **11 个金融工作流领域工具**（含 `fetch_real_market_data`，见 [§5](#5-领域工具)）
 - `run_id` 级别的运行产物隔离（`<output_base>/runs/<run_id>/`，路径穿越防护）
 - PolicyEngine 的 `allow` / `ask` / `deny` 确定性权限审批
 - guarded remediation 的人工审批与进程内恢复（`resume(ApprovalResponse)`）
 - OpenAI-compatible Chat Completions 模型适配器
-- 自然语言 CLI（`src/chat_agent.py`）
+- 自然语言 CLI（`src/chat_agent.py`），支持两种模式：
+  - **模式 A**：`--input_dir` 处理已有 CSV；
+  - **模式 B**：不传 `--input_dir`，由模型从自然语言提取 tickers/日期，调用
+    `fetch_real_market_data` 抓取真实数据到当前 run 的 `raw_data`，再走完整流程。
+- **固定 Markdown 最终报告中文化**（`final_workflow_report.md` /
+  `final_workflow_one_page.md`），含"数据来源与时间边界"章节。
 - Fake Model 与真实模型接口的可测试设计（测试全 mock，不访问网络）
 
 **开发状态**（简要，详见 `docs/`）：
@@ -42,6 +47,7 @@
 | Stage 9 | Agent Runtime MVP（tool-calling 骨架，Fake Model 驱动） | `docs/stage9_agent_runtime_mvp.md` |
 | Stage 10 | PolicyEngine + 进程内审批恢复 | `docs/stage10_policy_and_approval.md` |
 | Stage 11 | 自然语言 Agent Demo（真实 LLM + CLI） | `docs/stage11_natural_language_demo.md` |
+| Stage 12 | 自然语言抓取真实数据 + 中文最终报告 | `docs/stage12_natural_language_data_fetch_and_chinese_report.md` |
 
 ---
 
@@ -98,11 +104,12 @@ flowchart TD
 
 ## 5. 领域工具
 
-当前真实注册的 10 个工具（名称与 risk level 来自 `src/agent_tools/pipeline_tools.py`）：
+当前真实注册的 11 个工具（名称与 risk level 来自 `src/agent_tools/pipeline_tools.py`）：
 
 | 工具名 | 主要用途 | risk level |
 |---|---|---|
-| `configure_workflow` | 校验输入目录、更新上下文、创建当前 run 的 runner（必须最先调用） | workspace_write |
+| `fetch_real_market_data` | Stage 0：自然语言抓取真实 A 股数据到当前 run 的 raw_data（模式 B） | guarded |
+| `configure_workflow` | 校验输入目录、更新上下文、创建当前 run 的 runner（必须先有 input_dir） | workspace_write |
 | `inspect_pipeline_status` | 只读当前 run 的阶段状态、校验状态、修复轮数、标签安全 | read |
 | `profile_financial_data` | Stage 1：剖析原始 CSV（schema / 缺失 / 重复） | workspace_write |
 | `create_workflow_plan` | Stage 2：按剖析结果与分析目标规划工作流 | workspace_write |
@@ -146,39 +153,57 @@ python -B -m unittest discover -s tests -v
 
 ### 6.4 启动自然语言 Demo
 
-用提交的小型真实 fixture（无需先抓数据）：
+**模式 A：处理已有 CSV**（用提交的小型真实 fixture，无需先抓数据）：
 
 ```powershell
 python -B src/chat_agent.py `
   --input_dir test_data/real_market_sample `
-  --output_base outputs_real `
-  --prompt "检查这些真实市场数据，生成建模宽表，必要时安全修复并输出报告" `
+  --output_base outputs_agent `
+  --prompt "检查已有数据并生成中文报告" `
   --auto_approve_remediation
 ```
+
+**模式 B：自然语言自动抓取真实数据**（需网络与 TradingAgents 依赖可用）：
+
+```powershell
+python -B src/chat_agent.py `
+  --output_base outputs_agent `
+  --tradingagents_path ..\TradingAgents-astock-main `
+  --max_tool_turns 20 `
+  --prompt "获取贵州茅台600519和平安银行000001从2024年1月1日至2024年6月30日的真实市场数据，不使用当前基本面快照，生成用于五日收益率研究的建模宽表，检查未来函数和标签泄漏，必要时安全修复，最后生成完整中文报告。" `
+  --auto_approve_data_fetch `
+  --auto_approve_remediation
+```
+
+> 模式 B 下，Agent 从自然语言提取 tickers / start_date / end_date，先调
+> `fetch_real_market_data` 抓取到当前 run 的 `raw_data`，再走完整流程。自动测试全部
+> mock 网络，不访问真实网络。
 
 CLI 参数（与 `src/chat_agent.py` 的 argparse 一致）：
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--input_dir` | `test_data/real_market_sample` | 真实市场数据目录 |
+| `--input_dir` | 无（模式 B） | 真实市场数据目录（模式 A）；不传则模式 B 由模型抓取 |
 | `--output_base` | `outputs_real` | 产物根；每次 run 隔离在 `<base>/runs/<run_id>/` |
 | `--run_id` | 自动生成 `run_<8hex>` | 可选 run id |
 | `--prompt` | 从 stdin 读取 | 用户自然语言请求 |
 | `--model` | 覆盖 `FTA_LLM_MODEL` | 模型名 |
 | `--base_url` | 覆盖 `FTA_LLM_BASE_URL` | OpenAI-compatible base URL |
-| `--max_tool_turns` | 12 | 模型工具调用轮上限 |
-| `--auto_approve_remediation` | 关 | 自动批准 guarded 修复（现场 Demo 用） |
+| `--max_tool_turns` | 12 | 模型工具调用轮上限（模式 B 建议 20） |
+| `--auto_approve_remediation` | 关 | 只自动批准 `run_safe_remediation` |
+| `--auto_approve_data_fetch` | 关 | 只自动批准 `fetch_real_market_data`（模式 B） |
+| `--tradingagents_path` | 无 | TradingAgents-astock-main 路径（模式 B）；优先级高于环境变量 |
 | `--max_repair_rounds` | 3 | 透传给 PipelineRunner |
 | `--max_row_loss_ratio` | 0.05 | 累计删行上限，超过转人工 |
 | `--analysis_goal` | 默认 | 透传给 planner |
 
-> **不使用 `--auto_approve_remediation` 时**，guarded remediation 会请求用户确认（`Approve? [y/N]`）；输入 `y` 才执行。自动批准仍走 ASK 门，执行仍受内部安全门约束。
+> **不使用 `--auto_approve_*` 时**，guarded 工具会请求用户确认（`Approve? [y/N]`）；输入 `y` 才执行。`--auto_approve_remediation` 只自动批准 `run_safe_remediation`，`--auto_approve_data_fetch` 只自动批准 `fetch_real_market_data`，两者互不越权。自动批准仍走 ASK 门，执行仍受内部安全门约束。
 
 ### 6.5 确定性 Pipeline 入口（无需 LLM）
 
 ```powershell
-# 一键运行完整 Pipeline（推荐主入口）
-python -B src/run_all.py --input_dir test_data/real_market_sample --output_root outputs_real
+# 一键运行完整 Pipeline（推荐主入口；用于验证中文报告）
+python -B src/run_all.py --input_dir test_data/real_market_sample --output_root outputs_chinese_report_smoke
 
 # 交互式 Agent Shell（固定命令模式）
 python -B src/agent_shell.py --input_dir test_data/real_market_sample --output_root outputs_real
@@ -212,7 +237,7 @@ python -B src/agent_shell.py --input_dir test_data/real_market_sample --output_r
 python -B -m unittest discover -s tests -v
 ```
 
-实际运行结果：**145 项测试全部通过**（`Ran 145 tests ... OK`）。主要覆盖范围：
+实际运行结果：**191 项测试全部通过**（`Ran 191 tests ... OK`）。主要覆盖范围：
 
 - Pipeline 各阶段与 Remediation Agent 多轮闭环
 - ToolRegistry + JSON Schema 校验
@@ -222,8 +247,14 @@ python -B -m unittest discover -s tests -v
 - 审批暂停 / 恢复（防篡改、防跨 run、防重放、多 ToolCall 恢复）
 - OpenAI-compatible 消息 / 工具 schema 转换与错误处理
 - `chat_agent` CLI（参数、缺配置、Fake Model 全链、审批、输出路径、不访问网络）
+- **Stage 12**：`fetch_real_market_data` 工具（注册、ticker/日期/数量校验、raw_data
+  隔离、产物不逃出 run_root、fetch 后更新 input_dir、全失败/部分失败、mock adapter）、
+  模式 B 自然语言抓取完整链路（Fake Model + mock fetch）、按工具名分别自动批准、
+  无 input_dir 启动与 PRECONDITION_NOT_MET、中文最终报告（标题、数值来自产物、
+  summary.json 兼容、label 不进 approved、数据来源章节）。
 
-测试全部不访问网络、不依赖真实 LLM、不修改被提交的真实 fixture（故障注入到临时副本）。
+测试全部不访问网络、不依赖真实 LLM、不修改被提交的真实 fixture（故障注入到临时副本；
+抓取测试 mock `real_data_adapter.fetch_real_data`）。
 
 ---
 
@@ -235,13 +266,13 @@ python -B -m unittest discover -s tests -v
 financial_table_workflow_agent_v3/
 ├── src/                  # 运行代码（Pipeline 阶段 + CLI + Agent Runtime + 领域工具）
 │   ├── agent_runtime/    # Agent Runtime（models/context/registry/policy/runtime + 模型适配器）
-│   ├── agent_tools/      # 10 个金融领域工具
-│   ├── chat_agent.py     # 自然语言 Agent CLI
+│   ├── agent_tools/      # 11 个金融领域工具（含 fetch_real_market_data）
+│   ├── chat_agent.py     # 自然语言 Agent CLI（模式 A 已有 CSV / 模式 B 自然语言抓取）
 │   ├── pipeline_runner.py
 │   └── ...               # 各阶段模块与 CLI
-├── tests/                # 145 项 unittest
+├── tests/                # 191 项 unittest
 ├── test_data/real_market_sample/  # 小型真实 fixture（提交 Git）
-├── docs/                 # 分阶段设计文档
+├── docs/                 # 分阶段设计文档（stage2–stage12）
 ├── prompts/              # system prompt 与 planner prompt 模板
 ├── .env.example          # 环境变量占位符
 └── requirements.txt      # pandas + requests
@@ -257,7 +288,9 @@ financial_table_workflow_agent_v3/
 - **不包含 MCP、多 Agent 或插件系统**。
 - **不是生产级安全系统**：审批是进程内交互；API Key 由调用方负责保管。
 - **不记录或暴露模型隐藏推理**；只记录用户输入、工具调用、工具结果、最终文本。
-- 真实数据抓取需网络；流水线处理本身离线可运行。
+- **模式 B 真实抓取需网络与 TradingAgents-astock-main 依赖**；自动测试全部 mock，
+  不访问真实网络。流水线处理本身离线可运行。
+- **当前 PE/PB/ROE 是快照，不是历史 point-in-time 基本面**，不回填到历史日期。
 
 ---
 

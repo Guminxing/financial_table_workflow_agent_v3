@@ -1325,6 +1325,10 @@ class PipelineRunner:
             if not p.exists():
                 raise FileNotFoundError(f"report input not found: {p}")
 
+        # Stage 12：fetch_metadata.json 可选（自然语言抓取模式有；已有 CSV 模式可能无）。
+        # 不存在时 ReportGenerator 显示"用户提供的已有 CSV"。
+        fetch_metadata_path = self.input_dir / "fetch_metadata.json"
+
         gen = ReportGenerator()
         gen.load_inputs(
             profile_json=self.profile_json,
@@ -1338,6 +1342,8 @@ class PipelineRunner:
             final_validation_report=self.final_validation_json,
             approved_features=self.final_approved,
             data_dictionary=self.data_dictionary,
+            fetch_metadata=fetch_metadata_path,
+            input_dir=self.input_dir,
         )
         paths = gen.save_all(self.final_report_dir)
         summary = gen.build_summary()
