@@ -119,7 +119,7 @@ def _require_runner(ctx: AgentContext) -> "Any | ToolResult":
 # ======================================================================
 
 # A 股代码安全格式：6 位数字（可带 SH/SZ/BJ 前缀或 .SH/.SZ/.BJ 后缀）。
-# 工具层先做白名单校验，再交给 real_data_adapter 复用参考项目的 _normalize_ticker。
+# 工具层先做白名单校验，再交给项目内置数据源统一规范化 ticker。
 _ASHARE_TICKER_RE = re.compile(r"^(SH|SZ|BJ)?[0-9]{6}(\.(SH|SZ|BJ))?$")
 
 # 日期格式 YYYY-MM-DD
@@ -205,20 +205,17 @@ def _tool_fetch_real_market_data(
        [configure_workflow]。
 
     risk_level=GUARDED（涉及网络访问与工作区写入，默认 ASK 审批）。
-    不修改 TradingAgents-astock-main；不生成合成数据；不把当前基本面快照回填到
-    历史日期。
+    数据抓取由本项目内置 data_sources.astock 完成；不依赖其他 Agent 项目，
+    不生成合成数据，不把当前基本面快照回填到历史日期。
     """
-    import json as _json
-
     from real_data_adapter import (
         RealDataFetchConfig,
         fetch_real_data,
-        resolve_tradingagents_path,
     )
 
     ctx: AgentContext = context
 
-    # 1. 参数校验（白名单格式，不依赖参考项目）
+    # 1. 参数校验（白名单格式）
     try:
         tickers = _validate_fetch_tickers(arguments.get("tickers"))
     except ValueError as exc:
@@ -260,21 +257,17 @@ def _tool_fetch_real_market_data(
         )
     snapshot_fundamentals = bool(snapshot_fundamentals_arg)
 
-    # 2. 解析参考项目路径（受控配置，LLM 不能从自然语言任意指定本地路径）
-    #    优先级：AgentContext.tradingagents_path（CLI --tradingagents_path）>
-    #    环境变量 TRADINGAGENTS_ASTOCK_PATH > 默认 > 相对。
-    ta_path = resolve_tradingagents_path(ctx.tradingagents_path)
-
-    # 3. 抓取产物写入当前 run 的 raw_data（路径边界检查）
+    # 2. 抓取产物与缓存都写入当前 run 的 raw_data（路径边界检查）
     raw_data_dir = ctx.ensure_path_in_run_root(ctx.run_root / "raw_data")
     raw_data_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = ctx.ensure_path_in_run_root(raw_data_dir / "cache")
 
     config = RealDataFetchConfig(
         tickers=tickers,
         start_date=start_date,
         end_date=end_date,
         output_dir=raw_data_dir,
-        tradingagents_path=ta_path,
+        cache_dir=cache_dir,
         snapshot_fundamentals=snapshot_fundamentals,
     )
 
@@ -388,7 +381,10 @@ def _tool_fetch_real_market_data(
             "fetch_date": metadata.get("fetch_date"),
             "ohlcv_source_by_ticker": metadata.get("ohlcv_source_by_ticker"),
             "input_dir": str(ctx.input_dir).replace("\\", "/"),
-            "tradingagents_path": str(ta_path).replace("\\", "/"),
+            "data_provider": metadata.get("data_provider"),
+            "data_source_version": metadata.get("data_source_version"),
+            "volume_unit": metadata.get("volume_unit"),
+            "cache_dir": metadata.get("cache_dir"),
         },
         artifacts=_artifacts(ctx, artifact_paths),
         next_actions=["configure_workflow"],

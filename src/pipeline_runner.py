@@ -574,7 +574,6 @@ class PipelineRunner:
                 "  python -B src/run_fetch_real_data.py --tickers 600519 "
                 "--start_date 2024-01-01 --end_date 2024-01-10 "
                 "--output_dir data/real_market "
-                "--tradingagents_path D:\\dwzq\\TradingAgents-astock-main "
                 "--no_snapshot_fundamentals"
             )
         csv_files = sorted(self.input_dir.glob("*.csv"))

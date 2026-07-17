@@ -1,0 +1,20 @@
+financial_table_workflow_agent_v3
+
+This project includes modified portions of TradingAgents-Astock:
+Copyright 2026 Simon (github.com/simonlin1212)
+
+TradingAgents-Astock is a fork of TradingAgents, originally developed by
+TauricResearch (https://github.com/TauricResearch/TradingAgents).
+
+Original work Copyright 2024-2025 TauricResearch
+
+The applicable portions are licensed under the Apache License, Version 2.0.
+A copy of the license is provided at third_party/licenses/Apache-2.0.txt.
+
+The adapted portions in src/data_sources/astock.py include ticker
+normalisation, Tencent quote parsing, and a Sina K-line fallback. They were
+modified for this project to remove TradingAgents runtime, configuration, and
+agent dependencies; add a project-owned Eastmoney OHLCV primary source;
+support injectable HTTP sessions and isolated caller-controlled caches; and
+normalise errors and DataFrame schemas for this project's deterministic
+financial-table workflow.

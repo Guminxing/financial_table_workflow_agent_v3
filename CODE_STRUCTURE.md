@@ -36,6 +36,9 @@ financial_table_workflow_agent_v3/
 │   ├── chat_agent.py                   # 自然语言 Agent CLI（接真实 OpenAI-compatible LLM）
 │   ├── real_data_adapter.py            # 真实 A 股数据适配器
 │   ├── run_fetch_real_data.py          # 真实数据抓取 CLI（可 --run_pipeline）
+│   ├── data_sources/                    # 项目内置数据源（不依赖其他 Agent）
+│   │   ├── __init__.py
+│   │   └── astock.py                    # 东方财富 OHLCV + 新浪 fallback + 腾讯快照/行业
 │   ├── agent_runtime/                  # Agent Runtime（模型驱动 tool-calling + 确定性权限审批 + 真实 LLM 适配器）
 │   │   ├── __init__.py
 │   │   ├── models.py                   # 核心数据结构（ToolCall/ToolResult/ToolSpec/AgentEvent/AgentRunResult/RiskLevel/StopReason/EventType）
@@ -59,6 +62,7 @@ financial_table_workflow_agent_v3/
 │   ├── test_openai_compatible_client.py # OpenAICompatibleModelClient 适配器测试（全 mock 不访问网络）
 │   ├── test_chat_agent.py              # 自然语言 CLI 测试（模式 A/B + 按工具名审批 + Fake Model 全链）
 │   ├── test_fetch_tool.py              # Stage 12：fetch_real_market_data 工具测试（mock adapter，不访问网络）
+│   ├── test_astock_data_source.py       # 内置 A 股数据源 HTTP 解析/缓存/独立性测试
 │   └── test_chinese_report.py          # Stage 12：中文最终报告测试（标题/数值/summary 兼容/数据来源）
 ├── test_data/                          # 测试数据
 │   └── real_market_sample/             # 小型真实 A 股 fixture（提交 Git）
@@ -100,8 +104,8 @@ financial_table_workflow_agent_v3/
 └── .gitignore                          # 忽略运行时数据/产物/缓存/凭据
 ```
 
-> `src/` 共 29 个 Python 文件：1 个包标记 + 9 个核心模块 + 9 个 CLI 入口（含 `chat_agent.py`）+ `agent_runtime/`（8 个文件）与 `agent_tools/`（2 个文件）。
-> `tests/` 共 11 个 Python 文件，191 项 unittest。
+> `src/` 共 31 个 Python 文件：1 个包标记 + 9 个核心模块 + 9 个 CLI 入口（含 `chat_agent.py`）+ `agent_runtime/`（8 个文件）、`agent_tools/`（2 个文件）与 `data_sources/`（2 个文件）。
+> `tests/` 共 12 个 Python 文件，199 项 unittest。
 
 ---
 
@@ -131,13 +135,13 @@ financial_table_workflow_agent_v3/
 
 | 函数 | 职责 |
 |---|---|
-| `parse_args(argv)` | 解析 CLI 参数（见 README §6.4）；Stage 12：`--input_dir` 可选（模式 B）、`--auto_approve_data_fetch`、`--tradingagents_path` |
+| `parse_args(argv)` | 解析 CLI 参数（见 README §6.4）；Stage 12：`--input_dir` 可选（模式 B）、`--auto_approve_data_fetch` |
 | `run_chat(args, *, model_client=None, input_fn=input, output_fn=print) -> int` | 主逻辑，可注入 Fake Model 与 IO 函数测试；启动流程 AgentContext（模式 A 校验 input_dir / 模式 B 无 input_dir）→ToolRegistry→PolicyEngine→ModelClient→AgentRuntime→执行→事件回调打印进度→处理 awaiting_approval→输出最终回答+run_root+报告路径；退出码 0 完成/1 配置或运行错误/2 需人工介入 |
 | `_build_model_client(args, workspace_root)` | 构造真实 `OpenAICompatibleModelClient`；失败抛 `ModelConfigError` |
 | `_resolve_policy()` | 始终返回默认 `PolicyEngine()`（guarded→ASK）；`--auto_approve_*` 在 CLI 层按工具名自动回复 approved，不改策略 |
 | `_should_auto_approve(tool_name, *, auto_approve_data_fetch, auto_approve_remediation)` | Stage 12：按 `pending.tool_name` 决定是否自动批准（fetch→`--auto_approve_data_fetch`，remediation→`--auto_approve_remediation`，互不越权） |
 | `_handle_approval(runtime, result, *, auto_approve_data_fetch, auto_approve_remediation, input_fn, output_fn)` | 交互式 `Approve? [y/N]` 或按工具名 auto-approve，调 `runtime.resume(ApprovalResponse)` |
-| `_build_context(args, workspace_root, run_id)` | Stage 12：按是否传 `--input_dir` 构造 AgentContext（模式 A `create` / 模式 B `create_without_input_dir`），解析 TradingAgents 路径存入 context |
+| `_build_context(args, workspace_root, run_id)` | Stage 12：按是否传 `--input_dir` 构造 AgentContext（模式 A `create` / 模式 B `create_without_input_dir`） |
 | `_make_event_printer(output_fn)` | 构造 `AgentEvent` 回调，打印 `[tool]` / `[approval]` / `[stop]` 进度行；不打印完整 messages/隐藏推理/API Key |
 | `_find_report_path(ctx)` | 从当前 run 的 runner 读取 `full_report_md` 路径 |
 | `main()` | `return run_chat(parse_args())` |
@@ -160,7 +164,8 @@ financial_table_workflow_agent_v3/
 | `critic.py` | `ValidityCritic` | 对 prepared/repaired panel 做有效性审查（未来函数 / label leakage / announce_date 对齐 / 源码静态检查 / 时间切分），生成 `approved_feature_columns.json` |
 | `repair.py` | `RepairLoop`；`RepairStrategy` 协议；`DropRowsWithMissingCorePrice` / `DropExactDuplicateRows` / `TrimIndustryNameWhitespace`；`DEFAULT_STRATEGIES` / `list_strategies` | 策略注册表 + 有界多轮修复决策；单轮接口向后兼容 `run_repair.py`；多轮调度由 `PipelineRunner` 驱动 |
 | `report_generator.py` | `ReportGenerator` | 只读前五阶段全部产物，汇总成最终报告；Stage 12：中文正文 + "数据来源与时间边界"章节（读 `fetch_metadata.json`，无则显示"用户提供的已有 CSV"）；动态读取实际结果，不硬编码行数；`passed_with_warnings` 显示为"passed_with_warnings（通过但有警告）"不覆盖原值 |
-| `real_data_adapter.py` | `RealDataFetchConfig` / `fetch_real_data` / `resolve_tradingagents_path` | 复用参考项目 `TradingAgents-astock-main` 的真实 A 股行情获取能力，输出五张 CSV + `fetch_metadata.json`；严格防未来函数（不回填基本面快照到历史日期）；Stage 12：metadata 含 `snapshot_fundamentals_enabled` |
+| `data_sources/astock.py` | `AStockDataSource` / `normalize_ticker` | 项目内置 A 股数据源：东方财富日线为主、Sina HTTP fallback、腾讯当前快照、东方财富行业；HTTP session 可注入，缓存由调用方指定，不依赖其他 Agent 项目 |
+| `real_data_adapter.py` | `RealDataFetchConfig` / `fetch_real_data` | 把内置数据源转换为五张 CSV + `fetch_metadata.json`；缓存默认位于 `output_dir/cache`；严格防未来函数（不回填当前基本面快照） |
 
 ### 2.6 其他目录
 
@@ -183,7 +188,6 @@ ModelClient (Protocol, model_client.py)
 AgentContext (context.py)
   - workspace_root / input_dir (可 None) / output_base / run_id / run_root
   - analysis_goal / auto_repair / max_repair_rounds / max_row_loss_ratio
-  - tradingagents_path (Stage 12，受控配置)
   - runner: PipelineRunner | None
   - create() / create_without_input_dir() / configure_runner() / get_runner()
   - set_input_dir() / has_input_dir() / ensure_artifact_in_run_root() / ensure_path_in_run_root()
@@ -277,7 +281,7 @@ profile（FinancialTableProfiler）
 
 ## 6. 测试结构
 
-测试代码位于 `tests/`，共 191 项 unittest。各文件验证内容（不逐条罗列方法）：
+测试代码位于 `tests/`，共 199 项 unittest。各文件验证内容（不逐条罗列方法）：
 
 | 测试文件 | 主要覆盖内容 | 数据来源 |
 |---|---|---|
@@ -288,8 +292,9 @@ profile（FinancialTableProfiler）
 | `test_policy_engine.py` | 默认决策、工具级规则与优先级（DENY>ASK>ALLOW）、确定性、可序列化、fingerprint 稳定且 run 作用域、request_id 唯一 | 内存（无 fixture） |
 | `test_runtime_approval.py` | ASK/DENY 时 handler 未执行、批准只执行一次、拒绝反馈、错误 request_id/参数篡改/跨 run/重复审批被拒、resume 不重置计数器、多 ToolCall 暂停后继续、guarded 默认 ASK、批准不绕过安全门、awaiting vs requires_user_action、no-op repair 只用公开 API、端到端修复路径 | 真实 fixture 临时副本 + `ScriptedFakeModel` |
 | `test_openai_compatible_client.py` | ToolSpec 转 provider schema、messages 转 provider、final text 解析、单个/多个 tool_calls、非法 arguments JSON、空 choices/错误响应结构、timeout/HTTP error、错误信息不含 API Key、缺配置明确错误、`complete()` 端到端 | 内存（全 mock `requests.Session`，不访问网络） |
-| `test_chat_agent.py` | CLI 参数（`--input_dir` 可选 / `--auto_approve_data_fetch` / `--tradingagents_path`）、缺配置明确错误（退出码 1）、Fake Model 完成自然语言工具链（模式 A）、approval approve/reject、`--auto_approve_remediation`、`_should_auto_approve` 按工具名分别授权、模式 B 自然语言抓取完整链路（mock fetch）、fetch 拒绝不执行、无 input_dir 时 PRECONDITION_NOT_MET、输出含 run_root 与报告路径、不访问真实网络 | 真实 fixture 临时副本 + `ScriptedFakeModel` + mock `fetch_real_data` |
+| `test_chat_agent.py` | CLI 参数（`--input_dir` 可选 / `--auto_approve_data_fetch`）、缺配置明确错误（退出码 1）、Fake Model 完成自然语言工具链（模式 A/B）、approval approve/reject、按工具名分别授权、输出路径与无网络运行 | 真实 fixture 临时副本 + `ScriptedFakeModel` + mock `fetch_real_data` |
 | `test_fetch_tool.py` | Stage 12：`fetch_real_market_data` 注册、11 个工具、ticker/日期/数量校验、默认禁用 snapshot、raw_data 隔离、产物不逃出 run_root、fetch 后更新 input_dir、全失败结构化错误、部分失败保留成功 + warning、adapter 异常、risk=guarded | 真实 fixture 临时副本 + mock `real_data_adapter.fetch_real_data` |
+| `test_astock_data_source.py` | 内置数据源 ticker 规范化、东方财富日线解析、Sina fallback、腾讯快照、行业解析、run-local 缓存和外部 Agent 依赖边界 | 内存响应 + mock HTTP，不访问网络 |
 | `test_chinese_report.py` | Stage 12：中文报告标题、一页摘要标题、数值来自真实产物、summary.json 结构兼容、label 不进 approved、`passed_with_warnings` 中文显示、数据来源章节（有/无 fetch_metadata） | 真实 fixture 临时副本 |
 
 **测试关键设计**：
@@ -336,4 +341,4 @@ profile（FinancialTableProfiler）
 python -B -m unittest discover -s tests -v
 ```
 
-全量 191 项；改动局部时至少运行对应文件（见 [§6](#6-测试结构)）。
+全量 199 项；改动局部时至少运行对应文件（见 [§6](#6-测试结构)）。

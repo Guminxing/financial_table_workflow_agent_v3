@@ -32,7 +32,6 @@
     # 模式 B：自然语言自动抓取
     python -B src/chat_agent.py `
       --output_base outputs_agent `
-      --tradingagents_path ..\\TradingAgents-astock-main `
       --max_tool_turns 20 `
       --prompt "获取贵州茅台600519和平安银行000001从2024年1月1日至2024年6月30日的真实市场数据..." `
       --auto_approve_data_fetch `
@@ -50,8 +49,7 @@
 - 审批只决定"是否执行"，执行仍走 PipelineRunner → Remediation Agent，不绕过安全门。
 - ``--auto_approve_data_fetch`` 只自动批准 ``fetch_real_market_data``；
   ``--auto_approve_remediation`` 只自动批准 ``run_safe_remediation``；两者互不越权。
-- TradingAgents 路径由 CLI ``--tradingagents_path`` / 环境变量 / 默认解析，LLM 不能
-  从自然语言任意指定本地路径。
+- 真实 A 股数据由本项目内置数据源模块直接抓取，不依赖其他 Agent 项目。
 - 本阶段 session 只存在进程内，不实现跨进程持久化。
 - 不把 Demo 描述成生产级系统。
 """
@@ -181,13 +179,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--analysis_goal",
         default=None,
         help="Optional downstream analysis goal passed to the planner.",
-    )
-    p.add_argument(
-        "--tradingagents_path",
-        default=None,
-        help="Path to TradingAgents-astock-main (Mode B). Priority: this flag > "
-        "env TRADINGAGENTS_ASTOCK_PATH > default > relative. The LLM cannot set "
-        "this from natural language.",
     )
     return p.parse_args(argv)
 
@@ -336,15 +327,8 @@ def _build_context(
 
     - 传了 ``--input_dir``（模式 A）：用 ``AgentContext.create``，校验五张 CSV。
     - 没传（模式 B）：用 ``AgentContext.create_without_input_dir``，允许"先抓取再
-      configure"；tradingagents_path 解析后存入 context 供 fetch 工具受控使用。
+      configure"。数据抓取由项目内置 provider 完成。
     """
-    # 解析 TradingAgents 路径（CLI > 环境变量 > 默认 > 相对）；LLM 不能任意指定。
-    ta_path = None
-    if args.input_dir is None or args.tradingagents_path is not None:
-        from real_data_adapter import resolve_tradingagents_path
-
-        ta_path = resolve_tradingagents_path(args.tradingagents_path)
-
     if args.input_dir is not None:
         # 模式 A：已有 CSV
         return AgentContext.create(
@@ -355,7 +339,6 @@ def _build_context(
             analysis_goal=args.analysis_goal,
             max_repair_rounds=args.max_repair_rounds,
             max_row_loss_ratio=args.max_row_loss_ratio,
-            tradingagents_path=ta_path,
         )
     # 模式 B：自然语言抓取（先无 input_dir 启动）
     return AgentContext.create_without_input_dir(
@@ -365,7 +348,6 @@ def _build_context(
         analysis_goal=args.analysis_goal,
         max_repair_rounds=args.max_repair_rounds,
         max_row_loss_ratio=args.max_row_loss_ratio,
-        tradingagents_path=ta_path,
     )
 
 
@@ -392,8 +374,6 @@ def run_chat(
         output_fn(f"Input: {args.input_dir}  (mode A: existing CSVs)")
     else:
         output_fn("Input: (none; mode B: model will fetch real data)")
-    if args.tradingagents_path:
-        output_fn(f"TradingAgents path: {args.tradingagents_path}")
     output_fn("")
 
     # 1. AgentContext（模式 A 校验 input_dir；模式 B 无 input_dir 启动；绝不回退合成数据）

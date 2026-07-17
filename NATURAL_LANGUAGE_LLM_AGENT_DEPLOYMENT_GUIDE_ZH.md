@@ -16,7 +16,7 @@
 本指南覆盖：
 
 - 自然语言 LLM Agent 的两种工作模式（模式 A 处理已有 CSV、模式 B 自然语言抓取真实数据）。
-- 从环境准备、依赖安装、LLM 与参考项目配置，到运行、验收、故障排查的完整流程。
+- 从环境准备、依赖安装、LLM 与内置数据源验证，到运行、验收、故障排查的完整流程。
 - 确定性 Pipeline（`src/run_all.py`，无需 LLM）的中文报告验收流程。
 
 本指南**不**覆盖：跨进程 session 持久化、MCP、多 Agent、插件系统、Web UI（均未实现）。
@@ -115,27 +115,25 @@ requests>=2.32.0
 - **模式 B**（自然语言抓取）：需要网络访问以下域名（来自 `docs/stage8_real_data_adapter.md`）：
   - `money.finance.sina.com.cn`（Sina K-line fallback）
   - `qt.gtimg.cn`（腾讯 PE/PB 快照，仅当 `snapshot_fundamentals=true`）
+  - `push2his.eastmoney.com`（东财日线行情）
   - `push2.eastmoney.com`（东财行业字段）
-  - mootdx TCP 7709（可选；未安装 mootdx 时自动走 Sina HTTP fallback）
 - **LLM 调用**：需要能访问你配置的 OpenAI-compatible base URL。
 
 > 若运行环境无法联网，必须明确标记"网络限制"，**不得生成合成数据冒充测试成功**。
 
-### 3.4 外部参考项目（仅模式 B 需要）
+### 3.4 项目内置真实数据源（模式 B）
 
-模式 B 的真实数据抓取复用参考项目 `TradingAgents-astock-main`（只读依赖，**不修改**它）。
-解析逻辑来自 `src/real_data_adapter.py` 的 `resolve_tradingagents_path`，校验
-`tradingagents/dataflows/a_stock.py` 存在。
+模式 B 直接使用本项目的 `src/data_sources/astock.py`。该模块负责 A 股代码规范化、
+HTTP 请求、响应解析和缓存；不加载另一个 Agent 项目的 Runtime、配置或代码路径。
 
-路径解析优先级（来自源码）：
+- 日线行情：东方财富接口为主，新浪接口为回退。
+- 当前 PE/PB 快照：腾讯行情接口（仅 `snapshot_fundamentals=true`）。
+- 行业信息：东方财富接口。
+- 缓存：CLI 抓取默认为 `<output_dir>/cache/`；自然语言 Agent 固定使用
+  `<run_root>/raw_data/cache/`。
 
-1. CLI `--tradingagents_path` 显式传入
-2. 环境变量 `TRADINGAGENTS_ASTOCK_PATH`
-3. 默认路径 `D:\dwzq\TradingAgents-astock-main`
-4. 相对路径 `..\TradingAgents-astock-main`
-
-> 代码中不硬编码绝对路径；导师可在任意机器上用 `--tradingagents_path` 指定实际路径。
-> **LLM 不能从自然语言中任意指定本地路径**，路径由 CLI/环境变量受控配置。
+数据接口解析的改造来源与 Apache 2.0 许可证归属见仓库 `NOTICE` 和
+`third_party/licenses/Apache-2.0.txt`。运行本项目不需要安装或定位外部 Agent 仓库。
 
 ---
 
@@ -260,36 +258,21 @@ python -c "import os; print('API_KEY set:', bool(os.environ.get('FTA_LLM_API_KEY
 
 ---
 
-## 7. 配置 TradingAgents 参考项目路径（仅模式 B 需要）
+## 7. 验证项目内置数据源（模式 B）
 
-若要运行模式 B（自然语言抓取真实数据），需让 Agent 能找到 `TradingAgents-astock-main`。
-
-### 7.1 方式一：CLI 参数（推荐，最明确）
+模式 B 无需配置本地代码路径。可先运行一个最小抓取来验证依赖与网络：
 
 ```powershell
---tradingagents_path D:\dwzq\TradingAgents-astock-main
+python -B src/run_fetch_real_data.py `
+  --tickers 600519 `
+  --start_date 2024-01-01 `
+  --end_date 2024-01-10 `
+  --output_dir outputs_real/smoke `
+  --no_snapshot_fundamentals
 ```
 
-### 7.2 方式二：环境变量
-
-```powershell
-$env:TRADINGAGENTS_ASTOCK_PATH = "D:\dwzq\TradingAgents-astock-main"
-```
-
-### 7.3 方式三：默认/相对路径
-
-若不传 CLI 也不设环境变量，`resolve_tradingagents_path` 会依次尝试默认路径
-`D:\dwzq\TradingAgents-astock-main` 与相对路径 `..\TradingAgents-astock-main`，
-校验 `tradingagents/dataflows/a_stock.py` 存在。
-
-### 7.4 验证参考项目可用
-
-```powershell
-# 假设参考项目在 D:\dwzq\TradingAgents-astock-main
-Test-Path D:\dwzq\TradingAgents-astock-main\tradingagents\dataflows\a_stock.py
-```
-
-应返回 `True`。若为 `False`，模式 B 抓取会失败并报 `a_stock.py not found`。
+成功时目录中应出现五张 CSV 和 `fetch_metadata.json`；metadata 的 `data_provider`
+应为 `project_internal_astock_http`。若失败，先检查 §3.3 所列数据服务域名和网络策略。
 
 ---
 
@@ -315,6 +298,7 @@ python -B -m unittest discover -s tests -v
 | 测试文件 | 覆盖内容 |
 |---|---|
 | `tests/test_fetch_tool.py` | `fetch_real_market_data` 注册、11 个工具、ticker/日期/数量校验、raw_data 隔离、产物不逃出 run_root、fetch 后更新 input_dir、全失败/部分失败、risk=guarded |
+| `tests/test_astock_data_source.py` | 内置 A 股数据源解析、HTTP 回退、run-local 缓存、metadata 与外部 Agent 依赖隔离 |
 | `tests/test_chinese_report.py` | 中文报告标题、一页摘要标题、数值来自真实产物、summary.json 结构兼容、label 不进 approved、数据来源章节 |
 | `tests/test_chat_agent.py` | CLI 参数、模式 A/B 链路、按工具名审批、fetch 默认 ASK、fetch 拒绝不执行、无 input_dir 时 PRECONDITION_NOT_MET |
 | `tests/test_runtime_approval.py` | 审批暂停/恢复、防篡改/防跨 run/防重放、多 ToolCall 恢复、guarded 默认 ASK |
@@ -333,7 +317,7 @@ python -B -m unittest tests.test_chat_agent -v
 ## 9. 模式 A 部署与运行：处理已有 CSV
 
 模式 A 用提交的小型真实 fixture（`test_data/real_market_sample`，ticker 600519，
-2024-01-01..2024-01-10），无需网络与参考项目。
+2024-01-01..2024-01-10），无需网络。
 
 ### 9.1 运行命令
 
@@ -396,29 +380,27 @@ echo $LASTEXITCODE
 
 ## 10. 模式 B 部署与运行：自然语言抓取真实数据
 
-模式 B 不传 `--input_dir`，由模型从自然语言提取参数并抓取真实数据。**需要网络与
-参考项目可用**。
+模式 B 不传 `--input_dir`，由模型从自然语言提取参数并通过项目内置数据源抓取真实
+数据。**需要网络和对应数据服务接口可用**。
 
 ### 10.1 运行命令
 
 ```powershell
 python -B src/chat_agent.py `
   --output_base outputs_agent `
-  --tradingagents_path D:\dwzq\TradingAgents-astock-main `
   --max_tool_turns 20 `
   --prompt "获取贵州茅台600519和平安银行000001从2024年1月1日至2024年6月30日的真实市场数据，不使用当前基本面快照，生成用于五日收益率研究的建模宽表，检查未来函数和标签泄漏，必要时安全修复，最后生成完整中文报告。" `
   --auto_approve_data_fetch `
   --auto_approve_remediation
 ```
 
-> 把 `--tradingagents_path` 换成你机器上参考项目的实际路径。
+> 数据源已内置，不需要配置其他仓库路径。
 
 ### 10.2 关键参数说明
 
 | 参数 | 说明 |
 |---|---|
 | `--output_base` | 产物根；每次 run 隔离在 `<base>/runs/<run_id>/` |
-| `--tradingagents_path` | 参考项目路径（见 §7） |
 | `--max_tool_turns 20` | 模式 B 抓取链路较长，建议设 20（默认 12 可能不够） |
 | `--prompt` | 自然语言请求；必须含 tickers 与日期，否则模型会要求补充 |
 | `--auto_approve_data_fetch` | 只自动批准 `fetch_real_market_data` |
@@ -717,11 +699,12 @@ python -B src/chat_agent.py `
 **解决**：按 §6.2 在当前 PowerShell 会话设置环境变量后重试。注意环境变量仅当前
 会话有效，新开窗口需重新设置。
 
-### 15.2 `a_stock.py not found` / 抓取失败（模式 B）
+### 15.2 数据服务 HTTP 请求失败（模式 B）
 
-**原因**：`--tradingagents_path` 指向的路径不含 `tradingagents/dataflows/a_stock.py`。
+**原因**：运行环境无法访问行情服务、接口临时不可用，或响应格式异常。
 
-**解决**：按 §7 确认参考项目路径正确，或用 `--tradingagents_path` 显式传入。
+**解决**：按 §3.3 检查网络策略与域名可达性，再运行 §7 的最小抓取。详细错误记录在
+`fetch_metadata.json` 的 `errors` / `per_ticker_errors` 字段中。
 
 ### 15.3 `FETCH_NO_USABLE_DATA`（模式 B）
 
@@ -789,7 +772,7 @@ python -B src/chat_agent.py `
 
 - **不生成合成数据冒充真实行情**；输入缺失时明确失败，绝不静默回退。
 - **不把当前基本面快照回填到历史日期**（防未来信息泄漏）。
-- **不修改外部 TradingAgents-astock-main**（只读依赖）。
+- **项目独立运行**：真实数据模块属于本项目，不加载或调用另一个 Agent 项目。
 - **run_id 隔离 + 路径穿越防护**：`run_root` 严格位于 `output_base/runs/run_id`；
   工具只写当前 run_root，不覆盖原始输入 CSV。
 - **label 隔离**：`label_next_5d` 永远不进入 `approved_feature_columns`。
@@ -805,7 +788,7 @@ python -B src/chat_agent.py `
 - session 只存在进程内；不实现跨进程持久化。
 - 不实现 MCP / 多 Agent / 插件系统。
 - 不是生产级安全加固：审批是进程内交互。
-- 模式 B 真实抓取需网络与参考项目依赖；自动测试全部 mock，不访问真实网络。
+- 模式 B 真实抓取需网络与对应数据服务接口可用；自动测试全部 mock，不访问真实网络。
 - 当前 PE/PB/ROE 是快照，不是历史 point-in-time 基本面，不回填到历史日期。
 
 ---
@@ -819,7 +802,7 @@ python -B src/chat_agent.py `
 - [ ] Python 3.10+：`python --version`
 - [ ] 依赖安装：`pip install -r requirements.txt`
 - [ ] LLM 环境变量已设置（§6.4 验证）
-- [ ] 参考项目路径可用（仅模式 B，§7.4 验证）
+- [ ] 模式 B 已通过 §7 的项目内置数据源最小抓取（需要联网时）
 
 ### 17.2 测试套件
 
@@ -843,9 +826,9 @@ python -B src/chat_agent.py `
 - [ ] `final_workflow_report.md` 存在且为中文
 - [ ] 模型最终回答为中文
 
-### 17.5 自然语言 Agent 验收（模式 B，需 LLM + 网络 + 参考项目）
+### 17.5 自然语言 Agent 验收（模式 B，需 LLM + 网络）
 
-- [ ] 运行 §10.1 命令（替换 `--tradingagents_path` 为实际路径）
+- [ ] 运行 §10.1 命令
 - [ ] `fetch_real_market_data` 被调用（终端出现 `[tool] fetch_real_market_data ... completed`）
 - [ ] `run_root/raw_data/` 下含五张 CSV + `fetch_metadata.json`
 - [ ] 退出码 0
@@ -891,20 +874,18 @@ python -B src/chat_agent.py `
   --auto_approve_remediation
 ```
 
-### 18.4 模式 B（自然语言抓取，需 LLM + 网络 + 参考项目）
+### 18.4 模式 B（自然语言抓取，需 LLM + 网络）
 
 ```powershell
 python -B src/chat_agent.py `
   --output_base outputs_agent `
-  --tradingagents_path D:\dwzq\TradingAgents-astock-main `
   --max_tool_turns 20 `
   --prompt "获取贵州茅台600519和平安银行000001从2024年1月1日至2024年6月30日的真实市场数据，不使用当前基本面快照，生成用于五日收益率研究的建模宽表，检查未来函数和标签泄漏，必要时安全修复，最后生成完整中文报告。" `
   --auto_approve_data_fetch `
   --auto_approve_remediation
 ```
 
-> 运行前务必先设置 `FTA_LLM_*` 环境变量（§6.2）。把 `--tradingagents_path` 换成
-> 你机器上参考项目的实际路径。
+> 运行前务必先设置 `FTA_LLM_*` 环境变量（§6.2）。真实数据源已集成在本项目内。
 
 ---
 

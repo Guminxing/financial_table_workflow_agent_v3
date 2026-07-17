@@ -80,16 +80,17 @@ def _fake_metadata(out_dir: Path, tickers, *, snapshot=False,
     rows_by_ticker = {t: 7 for t in tickers if t not in failed_tickers}
     metadata = {
         "project": "financial_table_workflow_agent",
-        "adapter_version": "0.1",
+        "adapter_version": "0.2",
+        "data_source_version": "1.0",
+        "data_provider": "project_internal_astock_http",
         "generated_at": "2026-07-16 12:00:00",
         "fetch_date": "2026-07-16",
-        "tradingagents_path": "D:/dwzq/TradingAgents-astock-main",
-        "cache_dir": "D:/dwzq/financial_table_workflow_agent_v3/outputs/cache",
+        "cache_dir": str(out_dir / "cache").replace("\\", "/"),
         "requested_tickers": list(tickers),
         "resolved_tickers": [t for t in tickers if t not in failed_tickers],
         "start_date": "2024-01-01",
         "end_date": "2024-01-10",
-        "ohlcv_source_by_ticker": {t: "internal_fallback" for t in tickers if t not in failed_tickers},
+        "ohlcv_source_by_ticker": {t: "eastmoney_http" for t in tickers if t not in failed_tickers},
         "rows_by_ticker": rows_by_ticker,
         "per_ticker_errors": {t: "OHLCV fetch failed: RuntimeError: boom" for t in failed_tickers},
         "per_ticker_warnings": {},
@@ -441,6 +442,10 @@ class TestFetchDoesNotOverwriteDataRealMarket(unittest.TestCase):
 
     def test_fetch_writes_only_run_raw_data(self):
         written_paths: list[Path] = []
+        shared_price = HERE.parent / "data" / "real_market" / "price.csv"
+        shared_before = (
+            shared_price.read_bytes() if shared_price.exists() else None
+        )
 
         def fake(config):
             out = Path(config.output_dir)
@@ -460,9 +465,9 @@ class TestFetchDoesNotOverwriteDataRealMarket(unittest.TestCase):
         # 唯一写入目录在 run_root/raw_data 下
         self.assertEqual(len(written_paths), 1)
         written_paths[0].relative_to(self.ctx.run_root)
-        # data/real_market 不存在（未被写）
-        self.assertFalse((HERE.parent / "data" / "real_market" / "price.csv").exists()
-                        or not (HERE.parent / "data" / "real_market").exists())
+        # 已有 data/real_market 可能包含用户数据；工具不得创建或改写 price.csv。
+        shared_after = shared_price.read_bytes() if shared_price.exists() else None
+        self.assertEqual(shared_after, shared_before)
 
 
 if __name__ == "__main__":

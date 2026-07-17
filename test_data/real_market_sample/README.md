@@ -10,14 +10,13 @@ representative market sample and is **not** investment data.
 |---|---|
 | Security | 600519 (Kweichow Moutai, A-share) |
 | Date range | 2024-01-01 .. 2024-01-10 (inclusive) |
-| Data source | Real A-share OHLCV via the project's own adapter
-  (`src/real_data_adapter.py`), which reuses the reference project
-  `TradingAgents-astock-main` (`tradingagents/dataflows/a_stock.py`).
-  OHLCV came from the adapter's `internal_fallback` path (mootdx was not
-  installed; the reference project's Sina HTTP fallback was used). |
-| Fetch date | 2026-07-14 |
+| Data source | The project's standalone `src/data_sources/astock.py` via
+  `src/real_data_adapter.py`; OHLCV source `eastmoney_http`. No external
+  Agent repository is loaded or called at runtime. |
+| Fetch date | 2026-07-17 |
 | Snapshot fundamentals | **Disabled** (`--no_snapshot_fundamentals`) |
-| Adapter version | 0.1 |
+| Adapter / data source version | 0.2 / 1.0 |
+| Volume unit | Shares (`Eastmoney` board lots converted ×100) |
 
 ## Fetch command
 
@@ -27,7 +26,6 @@ python -B src/run_fetch_real_data.py ^
   --start_date 2024-01-01 ^
   --end_date 2024-01-10 ^
   --output_dir test_data/real_market_sample ^
-  --tradingagents_path D:\dwzq\TradingAgents-astock-main ^
   --no_snapshot_fundamentals
 ```
 
@@ -44,8 +42,8 @@ python -B src/run_fetch_real_data.py ^
 
 ## Why `--no_snapshot_fundamentals`
 
-The reference project's PE/PB/ROE are **current snapshots**, not a
-historical point-in-time fundamentals database. Backfilling a current
+The quote service's PE/PB/ROE are **current snapshots**, not a historical
+point-in-time fundamentals database. Backfilling a current
 snapshot into 2024 historical dates would **fabricate `announce_date`**
 and introduce **look-ahead bias**. To keep this fixture honest for
 2024-01-01..2024-01-10, fundamentals are fetched as header-only
@@ -61,6 +59,8 @@ and introduce **look-ahead bias**. To keep this fixture honest for
 - No API key, cookie, token, or personal cache is committed.
 - `fetch_metadata.json` records the auditable fetch information
   (ticker, dates, source label, row counts, the exact command).
+- Code-attribution and license details for adapted parsing logic are in the
+  repository-level `NOTICE` and `third_party/licenses/Apache-2.0.txt`.
 
 ## Disclaimer
 

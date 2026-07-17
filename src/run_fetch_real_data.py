@@ -1,33 +1,30 @@
 """命令行入口：抓取真实 A 股数据并可选运行流水线（第八阶段）。
 
-复用参考项目 TradingAgents-astock-main 的真实行情获取能力，输出本项目约定的
-五张 CSV + fetch_metadata.json；可选 --run_pipeline 直接运行完整流水线。
+使用本项目内置 A 股数据源，输出约定的五张 CSV + fetch_metadata.json；
+可选 --run_pipeline 直接运行完整流水线。
 
 用法（仅抓取）::
 
     python src/run_fetch_real_data.py --tickers 600519,000001,300750 \
         --start_date 2024-01-01 --end_date 2024-06-30 \
-        --output_dir data/real_market \
-        --tradingagents_path D:\\dwzq\\TradingAgents-astock-main
+        --output_dir data/real_market
 
 抓取并直接运行完整流水线::
 
     python src/run_fetch_real_data.py --tickers 600519,000001 \
         --start_date 2024-01-01 --end_date 2024-06-30 \
         --output_dir data/real_market \
-        --tradingagents_path D:\\dwzq\\TradingAgents-astock-main \
         --run_pipeline --output_root outputs_real
 
 行为：
-1. 解析参考项目路径（CLI > 环境变量 > 默认 > 相对）。
-2. 调 real_data_adapter.fetch_real_data 抓取五张 CSV + fetch_metadata.json。
+1. 调项目内部 real_data_adapter.fetch_real_data 抓取五张 CSV + fetch_metadata.json。
 3. 若 metadata.errors 非空或 price.csv 为空（全部 ticker 抓取失败）→ 打印错误、返回 1，
    不运行后续流水线。部分失败时继续处理成功 ticker，metadata 记录失败项。
 4. 若 --run_pipeline 且抓取有成功结果：调 PipelineRunner 运行完整流水线。
 5. 退出码：metadata.errors 非空或 price.csv 为空或任一阶段 failed → 1，否则 0。
 
 设计原则：
-- 不修改参考项目；缓存/日志写到当前项目 outputs/cache。
+- 不依赖其他 Agent 项目；缓存默认写到 ``output_dir/cache``。
 - 不用随机/样例/人工数据冒充真实行情；不把当前基本面快照回填到历史日期。
 - 网络/数据源错误必须记录到 metadata。
 - 路径用 pathlib，兼容 Windows，不写死绝对路径。
@@ -47,14 +44,13 @@ if str(HERE) not in sys.path:
 from real_data_adapter import (  # noqa: E402
     RealDataFetchConfig,
     fetch_real_data,
-    resolve_tradingagents_path,
 )
 from pipeline_runner import PipelineRunner  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Fetch real A-share data via TradingAgents-astock and optionally run the pipeline."
+        description="Fetch real A-share data with the project-owned provider and optionally run the pipeline."
     )
     p.add_argument(
         "--tickers",
@@ -77,15 +73,9 @@ def parse_args() -> argparse.Namespace:
         help="Directory to write the 5 CSVs + fetch_metadata.json (default: data/real_market).",
     )
     p.add_argument(
-        "--tradingagents_path",
-        default=None,
-        help="Path to TradingAgents-astock-main. If omitted, resolve via env "
-        "TRADINGAGENTS_ASTOCK_PATH / default / relative.",
-    )
-    p.add_argument(
         "--cache_dir",
         default=None,
-        help="Cache dir for TradingAgents OHLCV (default: outputs/cache under this project).",
+        help="OHLCV cache directory (default: <output_dir>/cache).",
     )
     p.add_argument(
         "--no_snapshot_fundamentals",
@@ -108,16 +98,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    ta_path = resolve_tradingagents_path(args.tradingagents_path)
-    print(f"[run_fetch_real_data] TradingAgents path: {ta_path}")
-    if not (ta_path / "tradingagents" / "dataflows" / "a_stock.py").exists():
-        print(
-            f"[run_fetch_real_data] ERROR: a_stock.py not found under {ta_path}. "
-            "Pass --tradingagents_path or set TRADINGAGENTS_ASTOCK_PATH.",
-            file=sys.stderr,
-        )
-        return 1
-
     tickers = [t.strip() for t in args.tickers.split(",") if t.strip()]
     if not tickers:
         print("[run_fetch_real_data] ERROR: no tickers parsed from --tickers", file=sys.stderr)
@@ -128,7 +108,6 @@ def main() -> int:
         start_date=args.start_date,
         end_date=args.end_date,
         output_dir=args.output_dir,
-        tradingagents_path=ta_path,
         cache_dir=args.cache_dir,
         snapshot_fundamentals=not args.no_snapshot_fundamentals,
     )

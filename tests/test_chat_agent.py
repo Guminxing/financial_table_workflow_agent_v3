@@ -127,7 +127,6 @@ class TestParseArgs(unittest.TestCase):
         self.assertEqual(args.max_tool_turns, 12)
         self.assertFalse(args.auto_approve_remediation)
         self.assertFalse(args.auto_approve_data_fetch)
-        self.assertIsNone(args.tradingagents_path)
         self.assertEqual(args.max_repair_rounds, 3)
         self.assertAlmostEqual(args.max_row_loss_ratio, 0.05)
 
@@ -150,8 +149,6 @@ class TestParseArgs(unittest.TestCase):
                 "5",
                 "--auto_approve_remediation",
                 "--auto_approve_data_fetch",
-                "--tradingagents_path",
-                r"D:\codex\dwzq\TradingAgents-astock-main",
                 "--max_repair_rounds",
                 "2",
                 "--max_row_loss_ratio",
@@ -165,7 +162,6 @@ class TestParseArgs(unittest.TestCase):
         self.assertEqual(args.max_tool_turns, 5)
         self.assertTrue(args.auto_approve_remediation)
         self.assertTrue(args.auto_approve_data_fetch)
-        self.assertEqual(args.tradingagents_path, r"D:\codex\dwzq\TradingAgents-astock-main")
         self.assertEqual(args.max_repair_rounds, 2)
         self.assertAlmostEqual(args.max_row_loss_ratio, 0.1)
 

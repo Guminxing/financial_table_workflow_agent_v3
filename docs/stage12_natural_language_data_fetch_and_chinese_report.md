@@ -61,9 +61,9 @@ PipelineRunner。**绝不静默回退到 fixture 或合成数据**。
 - **位置**：`src/agent_tools/pipeline_tools.py`（通过默认 ToolRegistry 注册）。
 - **risk level**：`guarded`（涉及网络访问与工作区写入，默认 ASK 审批）。
 - **不复制抓取实现**：直接复用 `src/real_data_adapter.py` 的 `RealDataFetchConfig` +
-  `fetch_real_data`；不通过 subprocess 调 `run_fetch_real_data.py`。
-- **不修改 TradingAgents-astock-main**；不生成合成数据；不把当前基本面快照回填到
-  历史日期。
+  `fetch_real_data`；底层由项目内置的 `src/data_sources/astock.py` 获取数据，不通过
+  subprocess 调 `run_fetch_real_data.py`，也不依赖另一个 Agent 项目。
+- **保持真实数据边界**：不生成合成数据；不把当前基本面快照回填到历史日期。
 
 ### 输入 JSON Schema
 
@@ -166,17 +166,17 @@ CLI 新增独立参数：
 
 ---
 
-## 6. TradingAgents 路径配置
+## 6. 项目内置数据源与缓存隔离
 
-复用 `real_data_adapter.resolve_tradingagents_path`。优先级：
+模式 B 直接调用项目自有的 `AStockDataSource`。该模块只负责 A 股代码规范化、HTTP
+请求、响应解析和缓存，不包含外部 Agent 的 Runtime、配置或决策逻辑：
 
-1. `chat_agent.py` 新增可选参数 `--tradingagents_path`。
-2. 环境变量 `TRADINGAGENTS_ASTOCK_PATH`。
-3. 现有 resolver 默认路径与相对路径。
+1. 日线行情优先使用东方财富接口，失败时回退新浪接口。
+2. 当前 PE/PB 快照使用腾讯行情接口；行业信息使用东方财富接口。
+3. 每次自然语言运行的缓存固定在 `<run_root>/raw_data/cache/`，与其他 run 隔离。
+4. CLI 不接受本地代码仓库路径，LLM 也不能控制数据源模块或任意文件系统路径。
 
-解析后的路径保存在 `AgentContext.tradingagents_path`，供 `fetch_real_market_data`
-受控使用。**LLM 不能从自然语言中任意指定本地 TradingAgents 路径**，避免模型控制
-文件系统路径。代码中不硬编码绝对路径。
+因此模式 B 只要求本项目依赖和网络可用，无需安装或定位另一个 Agent 仓库。
 
 ---
 
@@ -261,15 +261,14 @@ python -B src/chat_agent.py `
 ```powershell
 python -B src/chat_agent.py `
   --output_base outputs_agent `
-  --tradingagents_path ..\TradingAgents-astock-main `
   --max_tool_turns 20 `
   --prompt "获取贵州茅台600519和平安银行000001从2024年1月1日至2024年6月30日的真实市场数据，不使用当前基本面快照，生成用于五日收益率研究的建模宽表，检查未来函数和标签泄漏，必要时安全修复，最后生成完整中文报告。" `
   --auto_approve_data_fetch `
   --auto_approve_remediation
 ```
 
-> PowerShell 使用反引号续行。模式 B 需要网络与 TradingAgents 依赖可用；自动测试
-> 全部 mock 网络，不访问真实网络。
+> PowerShell 使用反引号续行。模式 B 需要网络可用；自动测试全部 mock 网络，不访问
+> 真实网络。
 
 ### 10.3 确定性 Pipeline（无需 LLM，验证中文报告）
 
@@ -292,14 +291,16 @@ python -B src/run_all.py `
   产物、summary.json 结构兼容、label 不进 approved、passed_with_warnings 中文显示、
   数据来源章节（有/无 fetch_metadata）。
 - `tests/test_chat_agent.py`（21 项，新增 9 项）：`--input_dir` 可选、
-  `--auto_approve_data_fetch` / `--tradingagents_path` 参数、`_should_auto_approve`
+  `--auto_approve_data_fetch` 参数、`_should_auto_approve`
   按工具名分别授权、fetch 默认 ASK、模式 B 完整链路（mock fetch）、fetch 拒绝不执行、
   无 input_dir 时 profile/configure 返回 PRECONDITION_NOT_MET。
+- `tests/test_astock_data_source.py`（8 项）：项目内置数据源解析、回退、缓存、metadata，
+  以及运行时代码不再引用外部 Agent 项目。
 - `tests/test_pipeline_tools.py`：不 configure 直接 profile 现在返回
   `PRECONDITION_NOT_MET`（原 `TOOL_EXECUTION_ERROR`）。
 
-全量测试：`python -B -m unittest discover -s tests -v` → 191 项全部通过
-（原 145 + 新增 46）。
+全量测试：`python -B -m unittest discover -s tests -v` → 199 项全部通过
+（原 191 + 独立数据源新增 8 项）。
 
 ---
 
@@ -327,8 +328,7 @@ python -B src/run_all.py `
 
 ## 13. 当前限制（明确声明）
 
-- 模式 B 真实抓取需要网络与 TradingAgents-astock-main 依赖可用；自动测试全部 mock，
-  不访问真实网络。
+- 模式 B 真实抓取需要数据服务接口和网络可用；自动测试全部 mock，不访问真实网络。
 - 只支持 OpenAI-compatible Chat Completions 接口。
 - session 只存在进程内；不实现跨进程持久化。
 - 不实现 MCP / 多 Agent / 插件系统。
@@ -353,10 +353,11 @@ docs/stage12_natural_language_data_fetch_and_chinese_report.md # 本文件
 ```
 src/agent_runtime/context.py          # 无 input_dir 启动 + set_input_dir + 路径边界
 src/agent_tools/pipeline_tools.py     # 新增 fetch_real_market_data（guarded）+ 11 工具 + PRECONDITION_NOT_MET
-src/chat_agent.py                    # --input_dir 可选 + --auto_approve_data_fetch + --tradingagents_path + 按工具名审批
+src/chat_agent.py                    # --input_dir 可选 + --auto_approve_data_fetch + 按工具名审批
 src/report_generator.py              # 中文报告 + 数据来源章节 + fetch_metadata/input_dir 可选输入
 src/pipeline_runner.py               # _final_report_impl 传 fetch_metadata/input_dir 给 ReportGenerator
-src/real_data_adapter.py             # metadata 增加 snapshot_fundamentals_enabled 字段
+src/real_data_adapter.py             # 项目内数据源编排 + metadata + 五表输出
+src/data_sources/astock.py           # 独立 A 股 HTTP 数据源、回退与缓存
 prompts/financial_agent_system.md    # 双模式 system prompt
 tests/test_chat_agent.py             # 模式 B 链路 + 按工具名审批测试
 tests/test_pipeline_tools.py         # 不 configure 直接 profile → PRECONDITION_NOT_MET
@@ -365,5 +366,5 @@ docs/stage8_real_data_adapter.md     # Stage 12 抓取工具说明
 docs/stage11_natural_language_demo.md # 模式 B 与中文报告说明
 ```
 
-未修改：`test_data/real_market_sample/` 真实 fixture、外部
-`TradingAgents-astock-main`、Stage 9–10 的核心 Runtime/Policy 逻辑（行为不变）。
+Stage 9–10 的核心 Runtime/Policy 逻辑保持不变。数据接口解析的来源归属与许可证见
+仓库根目录 `NOTICE` 和 `third_party/licenses/Apache-2.0.txt`。

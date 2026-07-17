@@ -15,6 +15,10 @@
 - **只做数据准备**：不选股、不择时、不预测涨跌、不训练模型、不输出投资建议、不连接真实券商交易系统。
 - **只使用真实市场数据**：合成样例数据及其自动生成逻辑已彻底移除；输入目录缺失时明确失败，绝不静默回退。
 - **确定性 + 模型驱动**：金融数据处理由确定性 Pipeline 完成；LLM 只负责理解意图、选择工具、决定下一步。
+- **独立数据源实现**：A 股行情、快照和行业查询由项目内置 `src/data_sources/astock.py`
+  直接完成，不依赖或运行其他 Agent 项目。
+- **来源与许可证透明**：相关解析代码的改造说明见 `NOTICE`，Apache 2.0 文本见
+  `third_party/licenses/Apache-2.0.txt`。
 
 ---
 
@@ -163,12 +167,11 @@ python -B src/chat_agent.py `
   --auto_approve_remediation
 ```
 
-**模式 B：自然语言自动抓取真实数据**（需网络与 TradingAgents 依赖可用）：
+**模式 B：自然语言自动抓取真实数据**（只需网络，不依赖其他 Agent 项目）：
 
 ```powershell
 python -B src/chat_agent.py `
   --output_base outputs_agent `
-  --tradingagents_path ..\TradingAgents-astock-main `
   --max_tool_turns 20 `
   --prompt "获取贵州茅台600519和平安银行000001从2024年1月1日至2024年6月30日的真实市场数据，不使用当前基本面快照，生成用于五日收益率研究的建模宽表，检查未来函数和标签泄漏，必要时安全修复，最后生成完整中文报告。" `
   --auto_approve_data_fetch `
@@ -192,7 +195,6 @@ CLI 参数（与 `src/chat_agent.py` 的 argparse 一致）：
 | `--max_tool_turns` | 12 | 模型工具调用轮上限（模式 B 建议 20） |
 | `--auto_approve_remediation` | 关 | 只自动批准 `run_safe_remediation` |
 | `--auto_approve_data_fetch` | 关 | 只自动批准 `fetch_real_market_data`（模式 B） |
-| `--tradingagents_path` | 无 | TradingAgents-astock-main 路径（模式 B）；优先级高于环境变量 |
 | `--max_repair_rounds` | 3 | 透传给 PipelineRunner |
 | `--max_row_loss_ratio` | 0.05 | 累计删行上限，超过转人工 |
 | `--analysis_goal` | 默认 | 透传给 planner |
@@ -237,7 +239,7 @@ python -B src/agent_shell.py --input_dir test_data/real_market_sample --output_r
 python -B -m unittest discover -s tests -v
 ```
 
-实际运行结果：**191 项测试全部通过**（`Ran 191 tests ... OK`）。主要覆盖范围：
+实际运行结果：**199 项测试全部通过**（`Ran 199 tests ... OK`）。主要覆盖范围：
 
 - Pipeline 各阶段与 Remediation Agent 多轮闭环
 - ToolRegistry + JSON Schema 校验
@@ -265,12 +267,13 @@ python -B -m unittest discover -s tests -v
 ```
 financial_table_workflow_agent_v3/
 ├── src/                  # 运行代码（Pipeline 阶段 + CLI + Agent Runtime + 领域工具）
+│   ├── data_sources/     # 项目内置 A 股 HTTP 数据源（东方财富/腾讯/新浪）
 │   ├── agent_runtime/    # Agent Runtime（models/context/registry/policy/runtime + 模型适配器）
 │   ├── agent_tools/      # 11 个金融领域工具（含 fetch_real_market_data）
 │   ├── chat_agent.py     # 自然语言 Agent CLI（模式 A 已有 CSV / 模式 B 自然语言抓取）
 │   ├── pipeline_runner.py
 │   └── ...               # 各阶段模块与 CLI
-├── tests/                # 191 项 unittest
+├── tests/                # 199 项 unittest
 ├── test_data/real_market_sample/  # 小型真实 fixture（提交 Git）
 ├── docs/                 # 分阶段设计文档（stage2–stage12）
 ├── prompts/              # system prompt 与 planner prompt 模板
@@ -288,7 +291,7 @@ financial_table_workflow_agent_v3/
 - **不包含 MCP、多 Agent 或插件系统**。
 - **不是生产级安全系统**：审批是进程内交互；API Key 由调用方负责保管。
 - **不记录或暴露模型隐藏推理**；只记录用户输入、工具调用、工具结果、最终文本。
-- **模式 B 真实抓取需网络与 TradingAgents-astock-main 依赖**；自动测试全部 mock，
+- **模式 B 真实抓取需要网络**；数据源实现位于本项目内部，自动测试全部 mock，
   不访问真实网络。流水线处理本身离线可运行。
 - **当前 PE/PB/ROE 是快照，不是历史 point-in-time 基本面**，不回填到历史日期。
 

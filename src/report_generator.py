@@ -392,7 +392,14 @@ class ReportGenerator:
                 ),
                 "warnings": self.fetch_metadata.get("warnings", []),
                 "errors": self.fetch_metadata.get("errors", []),
-                "tradingagents_path": self.fetch_metadata.get("tradingagents_path"),
+                "data_provider": self.fetch_metadata.get(
+                    "data_provider", "unspecified_adapter"
+                ),
+                "data_source_version": self.fetch_metadata.get(
+                    "data_source_version"
+                ),
+                "volume_unit": self.fetch_metadata.get("volume_unit"),
+                "cache_dir": self.fetch_metadata.get("cache_dir"),
             }
         # 无 fetch_metadata：用户提供的已有 CSV
         discovered_csvs: list[str] = []
@@ -920,6 +927,11 @@ class ReportGenerator:
             lines.append(f"- 起始日期：{ds.get('start_date')}")
             lines.append(f"- 结束日期：{ds.get('end_date')}")
             lines.append(f"- 抓取日期（fetch_date）：{ds.get('fetch_date')}")
+            lines.append(
+                f"- 数据提供器：{ds.get('data_provider')} "
+                f"(version={ds.get('data_source_version')})"
+            )
+            lines.append(f"- 成交量单位：{ds.get('volume_unit') or '未声明'}")
             lines.append(f"- 各 ticker 行情来源：{ds.get('ohlcv_source_by_ticker')}")
             lines.append(f"- 各 ticker 行数：{ds.get('rows_by_ticker')}")
             sr = ds.get("summary_rows", {}) or {}
@@ -1013,6 +1025,11 @@ class ReportGenerator:
                 f"tickers={ds.get('resolved_tickers')}，"
                 f"{ds.get('start_date')} ~ {ds.get('end_date')}，"
                 f"fetch_date={ds.get('fetch_date')}。"
+            )
+            lines.append(
+                f"- 数据提供器：{ds.get('data_provider')}；"
+                f"成交量单位：{ds.get('volume_unit') or '未声明'}；"
+                f"各 ticker 来源：{ds.get('ohlcv_source_by_ticker')}。"
             )
             sr = ds.get("summary_rows", {}) or {}
             lines.append(

@@ -260,10 +260,11 @@ Stage 12 在 Stage 11 基础上扩展（详见
 - **新增工具 `fetch_real_market_data`**（guarded）：模型从自然语言提取 tickers /
   start_date / end_date，抓取真实 A 股数据到当前 run 的 `raw_data`，再走完整流程。
 - **`--input_dir` 改为可选**：模式 A（已有 CSV）/ 模式 B（自然语言抓取）。
-- **`--auto_approve_data_fetch` / `--tradingagents_path`** 新增 CLI 参数；审批按
+- **`--auto_approve_data_fetch`** 新增 CLI 参数；真实数据由项目内置数据源获取，审批按
   `pending.tool_name` 分别授权（fetch / remediation 互不越权）。
 - **固定 Markdown 最终报告中文化**：`final_workflow_report.md` /
   `final_workflow_one_page.md` 中文正文 + "数据来源与时间边界"章节。
 - **AgentContext 支持无 input_dir 启动**：`create_without_input_dir` + `set_input_dir`。
-- 测试扩展至 191 项（新增 `test_fetch_tool.py` 28 项 + `test_chinese_report.py` 9 项 +
-  `test_chat_agent.py` 9 项）。
+- Stage 12 当时测试扩展至 191 项（新增 `test_fetch_tool.py` 28 项 +
+  `test_chinese_report.py` 9 项 + `test_chat_agent.py` 9 项）；当前独立数据源改造后为
+  199 项。

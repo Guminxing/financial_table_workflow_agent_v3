@@ -295,7 +295,7 @@ financial_table_workflow_agent/
 
 ```bash
 pip install -r requirements.txt
-python src/run_fetch_real_data.py --tickers 600519 --start_date 2024-01-01 --end_date 2024-01-10 --output_dir data/real_market --tradingagents_path D:\dwzq\TradingAgents-astock-main --no_snapshot_fundamentals
+python src/run_fetch_real_data.py --tickers 600519 --start_date 2024-01-01 --end_date 2024-01-10 --output_dir data/real_market --no_snapshot_fundamentals
 python src/run_profile.py    --input_dir data/real_market --output_dir outputs_real/profiles
 python src/run_planner.py    --profile_path outputs_real/profiles/profile.json --output_dir outputs_real/plans
 python src/run_executor.py   --input_dir data/real_market --plan_path outputs_real/plans/workflow_plan.json --output_dir outputs_real/prepared

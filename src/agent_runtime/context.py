@@ -102,7 +102,6 @@ def validate_input_dir(input_dir: str | Path) -> Path:
             "  python -B src/run_fetch_real_data.py --tickers 600519 "
             "--start_date 2024-01-01 --end_date 2024-01-10 "
             "--output_dir data/real_market "
-            "--tradingagents_path D:\\dwzq\\TradingAgents-astock-main "
             "--no_snapshot_fundamentals"
         )
     if not d.is_dir():
@@ -135,7 +134,6 @@ class AgentContext:
     - ``run_root``: ``output_base / "runs" / run_id``（严格隔离）。
     - ``analysis_goal`` / ``auto_repair`` / ``max_repair_rounds`` /
       ``max_row_loss_ratio``: 传给 PipelineRunner 的配置。
-    - ``tradingagents_path``: 参考项目路径（Stage 12；fetch 工具受控使用）。
     - ``runner``: 当前 run 专属的 PipelineRunner 实例（configure 后创建）。
 
     用法（已有 CSV 模式）::
@@ -155,7 +153,6 @@ class AgentContext:
             workspace_root=Path("..."),
             output_base="outputs_real",
             run_id="run_xxx",
-            tradingagents_path=resolve_tradingagents_path(...),
         )
         # 模型先调 fetch_real_market_data → ctx.set_input_dir(raw_data)
         # 再调 configure_workflow → ctx.configure_runner(...)
@@ -171,7 +168,6 @@ class AgentContext:
         auto_repair: bool = True,
         max_repair_rounds: int = 3,
         max_row_loss_ratio: float = 0.05,
-        tradingagents_path: str | Path | None = None,
     ) -> None:
         self.workspace_root = Path(workspace_root).resolve()
         # input_dir 可为 None（Stage 12 无 input_dir 启动状态）
@@ -184,13 +180,6 @@ class AgentContext:
         self.auto_repair = bool(auto_repair)
         self.max_repair_rounds = int(max_repair_rounds)
         self.max_row_loss_ratio = float(max_row_loss_ratio)
-        # Stage 12：参考项目路径（受控配置，LLM 不能从自然语言任意指定）
-        self.tradingagents_path: Path | None = (
-            Path(tradingagents_path).resolve()
-            if tradingagents_path is not None
-            else None
-        )
-
         # run_root 严格位于 output_base / "runs" / run_id
         self.run_root = (self.output_base / "runs" / self.run_id).resolve()
 
@@ -220,7 +209,6 @@ class AgentContext:
         auto_repair: bool = True,
         max_repair_rounds: int = 3,
         max_row_loss_ratio: float = 0.05,
-        tradingagents_path: str | Path | None = None,
     ) -> "AgentContext":
         """创建并校验 AgentContext（已有 CSV 模式）。
 
@@ -237,7 +225,6 @@ class AgentContext:
             auto_repair=auto_repair,
             max_repair_rounds=max_repair_rounds,
             max_row_loss_ratio=max_row_loss_ratio,
-            tradingagents_path=tradingagents_path,
         )
 
     @classmethod
@@ -250,7 +237,6 @@ class AgentContext:
         auto_repair: bool = True,
         max_repair_rounds: int = 3,
         max_row_loss_ratio: float = 0.05,
-        tradingagents_path: str | Path | None = None,
     ) -> "AgentContext":
         """创建"尚未配置输入目录"的 AgentContext（Stage 12 自然语言抓取模式）。
 
@@ -270,7 +256,6 @@ class AgentContext:
             auto_repair=auto_repair,
             max_repair_rounds=max_repair_rounds,
             max_row_loss_ratio=max_row_loss_ratio,
-            tradingagents_path=tradingagents_path,
         )
 
     # ------------------------------------------------------------------
@@ -417,10 +402,5 @@ class AgentContext:
             "auto_repair": self.auto_repair,
             "max_repair_rounds": self.max_repair_rounds,
             "max_row_loss_ratio": self.max_row_loss_ratio,
-            "tradingagents_path": (
-                str(self.tradingagents_path).replace("\\", "/")
-                if self.tradingagents_path is not None
-                else None
-            ),
             "runner_configured": self.runner is not None,
         }
