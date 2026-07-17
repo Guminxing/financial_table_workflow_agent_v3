@@ -32,6 +32,11 @@ outputs_real/*
 !outputs_real/.gitkeep
 outputs_real_verify/
 
+# Output dirs the docs tell users to pass to --output_base / --output_root
+# (NOT committed; created by following README.md / docs/LLM_AGENT.md / docs/PIPELINE.md).
+outputs_agent/
+outputs_chinese_report_smoke/
+
 # Real data fetch cache + throwaway test outputs (NOT committed).
 outputs/cache/
 outputs/sessions/
