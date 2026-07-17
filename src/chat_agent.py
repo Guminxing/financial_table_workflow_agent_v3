@@ -230,6 +230,11 @@ def _make_event_printer(output_fn: Callable[[str], None]) -> Callable[[AgentEven
             )
         elif et == EventType.RUNTIME_STOP.value:
             output_fn(f"[stop] {pl.get('stop_reason')}")
+            # Runtime 把兜底异常记在 payload["error"]；不打印它会让
+            # runtime_error 无从排查（事件流不落盘）。
+            error = pl.get("error")
+            if error:
+                output_fn(f"[stop] error: {error}")
 
     return _print
 

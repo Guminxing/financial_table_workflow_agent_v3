@@ -786,5 +786,82 @@ class TestNaturalLanguageFetchChain(unittest.TestCase):
         self.assertIn("fetch_real_market_data", cfg.next_actions)
 
 
+# ======================================================================
+# runtime_error 的可诊断性
+# ======================================================================
+
+
+class _RaisingFakeModel:
+    """complete() 抛异常，用于触发 Runtime 的兜底 runtime_error。不访问网络。"""
+
+    def __init__(self, exc: Exception):
+        self._exc = exc
+
+    def complete(self, messages, tools):
+        raise self._exc
+
+
+class TestRuntimeErrorIsDiagnosable(unittest.TestCase):
+    """Runtime 把兜底异常记在 runtime_stop 事件的 payload["error"]。
+
+    事件流不落盘，若 CLI 不打印该字段，runtime_error 就只剩一个无从排查的名字。
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="chat_"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run(self, exc: Exception) -> tuple[int, str]:
+        input_dir = _copy_fixture(self.tmp, "input")
+        out = _Output()
+        args = parse_args(
+            [
+                "--input_dir",
+                str(input_dir),
+                "--output_base",
+                str(self.tmp / "outputs"),
+                "--run_id",
+                "run_err",
+                "--prompt",
+                "检查数据并生成最终报告",
+            ]
+        )
+        rc = run_chat(args, model_client=_RaisingFakeModel(exc), output_fn=out)
+        return rc, out.text
+
+    def test_runtime_error_prints_underlying_exception(self):
+        rc, text = self._run(RuntimeError("upstream gateway exploded"))
+        self.assertEqual(rc, 2)
+        self.assertIn("[stop] runtime_error", text)
+        # 关键：真实异常类型与消息必须可见
+        self.assertIn("[stop] error:", text)
+        self.assertIn("RuntimeError", text)
+        self.assertIn("upstream gateway exploded", text)
+
+    def test_normal_stop_has_no_error_line(self):
+        """completed 等正常停止不带 error，不应打印空的 error 行。"""
+        input_dir = _copy_fixture(self.tmp, "input")
+        out = _Output()
+        args = parse_args(
+            [
+                "--input_dir",
+                str(input_dir),
+                "--output_base",
+                str(self.tmp / "outputs"),
+                "--run_id",
+                "run_ok",
+                "--prompt",
+                "只回答，不调用工具",
+            ]
+        )
+        model = ScriptedFakeModel([AssistantTurn(final_text="好的，已完成。")])
+        rc = run_chat(args, model_client=model, output_fn=out)
+        self.assertEqual(rc, 0)
+        self.assertIn("[stop] completed", out.text)
+        self.assertNotIn("[stop] error:", out.text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

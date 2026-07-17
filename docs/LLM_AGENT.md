@@ -388,7 +388,7 @@ python -B src/run_fetch_real_data.py `
 python -B -m unittest discover -s tests -v
 ```
 
-**实际结果：199 项全部通过**（`Ran 199 tests ... OK`）。测试**不访问网络、不依赖真实 LLM、
+**实际结果：201 项全部通过**（`Ran 201 tests ... OK`）。测试**不访问网络、不依赖真实 LLM、
 不修改被提交的 fixture**（故障注入到临时副本；抓取测试 mock `real_data_adapter.fetch_real_data`）。
 
 Agent 相关的关键测试文件：
@@ -451,7 +451,7 @@ Agent 相关的关键测试文件：
 - [ ] （模式 B）§9 的最小抓取成功
 
 **测试**
-- [ ] `python -B -m unittest discover -s tests -v` 末尾 `OK`（199 项）
+- [ ] `python -B -m unittest discover -s tests -v` 末尾 `OK`（201 项）
 - [ ] `git diff --stat test_data/` 为空（fixture 未被修改）
 
 **确定性 Pipeline（无需 LLM）** — 详见 [PIPELINE.md](PIPELINE.md)
@@ -489,7 +489,7 @@ Agent 相关的关键测试文件：
 # 配置
 $env:FTA_LLM_API_KEY = "..."; $env:FTA_LLM_BASE_URL = "..."; $env:FTA_LLM_MODEL = "..."
 
-# 测试（199 项，不联网）
+# 测试（201 项，不联网）
 python -B -m unittest discover -s tests -v
 
 # 确定性 Pipeline（无需 LLM）

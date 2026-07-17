@@ -84,7 +84,7 @@ $env:FTA_LLM_MODEL = "your-model-name"
 **三条主命令**：
 
 ```powershell
-# 测试（199 项，不联网、不依赖真实 LLM）
+# 测试（201 项，不联网、不依赖真实 LLM）
 python -B -m unittest discover -s tests -v
 
 # 确定性 Pipeline（无需 LLM）
@@ -110,7 +110,7 @@ financial_table_workflow_agent_v3/
 │   ├── agent_tools/      # 11 个金融领域工具
 │   ├── data_sources/     # 项目内置 A 股 HTTP 数据源
 │   └── pipeline_runner.py 等各阶段模块与 CLI
-├── tests/                # 199 项 unittest
+├── tests/                # 201 项 unittest
 ├── test_data/real_market_sample/  # 小型真实 fixture（提交 Git）
 ├── prompts/              # system prompt（被代码实际加载）与 planner prompt 模板
 ├── docs/                 # LLM_AGENT.md / PIPELINE.md / archive

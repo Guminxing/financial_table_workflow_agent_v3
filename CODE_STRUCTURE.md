@@ -96,7 +96,7 @@ financial_table_workflow_agent_v3/
 ```
 
 > `src/` 共 31 个 Python 文件：1 个包标记 + 9 个核心模块 + 9 个 CLI 入口（含 `chat_agent.py`）+ `agent_runtime/`（8 个文件）、`agent_tools/`（2 个文件）与 `data_sources/`（2 个文件）。
-> `tests/` 共 12 个 Python 文件，199 项 unittest。
+> `tests/` 共 12 个 Python 文件，201 项 unittest。
 
 ---
 
@@ -272,7 +272,7 @@ profile（FinancialTableProfiler）
 
 ## 6. 测试结构
 
-测试代码位于 `tests/`，共 199 项 unittest。各文件验证内容（不逐条罗列方法）：
+测试代码位于 `tests/`，共 201 项 unittest。各文件验证内容（不逐条罗列方法）：
 
 | 测试文件 | 主要覆盖内容 | 数据来源 |
 |---|---|---|
@@ -332,4 +332,4 @@ profile（FinancialTableProfiler）
 python -B -m unittest discover -s tests -v
 ```
 
-全量 199 项；改动局部时至少运行对应文件（见 [§6](#6-测试结构)）。
+全量 201 项；改动局部时至少运行对应文件（见 [§6](#6-测试结构)）。
