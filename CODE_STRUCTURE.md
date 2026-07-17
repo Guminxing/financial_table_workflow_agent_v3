@@ -1,7 +1,8 @@
 # Code Structure
 
 > 本文件面向希望继续阅读代码的人，提供目录结构、模块职责、核心数据结构、调用链与扩展位置。
-> 项目总览、快速开始与 Demo 见 [README.md](README.md)；分阶段设计见 [docs/](docs/)。
+> 项目总览与快速开始见 [README.md](README.md)；LLM Agent 见 [docs/LLM_AGENT.md](docs/LLM_AGENT.md)；
+> 确定性 Pipeline 见 [docs/PIPELINE.md](docs/PIPELINE.md)。
 >
 > - `src/` 是**运行代码**。
 > - `tests/` 是**测试代码**。
@@ -80,20 +81,10 @@ financial_table_workflow_agent_v3/
 │   ├── .gitkeep
 │   └── runs/                           # Agent Runtime 按 run_id 隔离的运行目录
 │       └── <run_id>/                   # profiles/plans/prepared/validation/repaired/...
-├── docs/                               # 分阶段设计文档
-│   ├── project_scope.md
-│   ├── project_overview_zh.md
-│   ├── stage2_workflow_planner.md
-│   ├── stage3_code_executor.md
-│   ├── stage4_validity_critic.md
-│   ├── stage5_remediation_loop.md
-│   ├── stage6_report_generator.md
-│   ├── stage7_agent_shell.md
-│   ├── stage8_real_data_adapter.md
-│   ├── stage9_agent_runtime_mvp.md
-│   ├── stage10_policy_and_approval.md
-│   ├── stage11_natural_language_demo.md
-│   └── stage12_natural_language_data_fetch_and_chinese_report.md
+├── docs/
+│   ├── LLM_AGENT.md                    # LLM Agent 主文档（架构/工具/审批/运行/排查/验收）
+│   ├── PIPELINE.md                     # 确定性七阶段 Pipeline
+│   └── archive/                        # 分阶段开发过程记录（Stage 2–12，已被主文档取代）
 ├── prompts/
 │   ├── workflow_planner_prompt.md      # LLM Planner Prompt 模板（供后续接入）
 │   └── financial_agent_system.md       # 自然语言 Agent system prompt
@@ -171,7 +162,7 @@ financial_table_workflow_agent_v3/
 
 - `prompts/`：`financial_agent_system.md`（自然语言 Agent system prompt，Stage 12 双模式）、`workflow_planner_prompt.md`（LLM Planner 模板，供后续接入）。
 - `tests/`：见 [§6](#6-测试结构)。
-- `docs/`：分阶段设计文档（`stage2`–`stage12` + `project_scope.md` + `project_overview_zh.md`）。
+- `docs/`：`LLM_AGENT.md`（LLM Agent 主文档）、`PIPELINE.md`（确定性七阶段）、`archive/`（Stage 2–12 开发过程记录，已被前两者取代）。
 - `test_data/real_market_sample/`：小型真实 A 股 fixture（ticker 600519，2024-01-01..2024-01-10），仅用于测试与最小演示，不是代表性市场样本，不是投资数据。
 
 ---

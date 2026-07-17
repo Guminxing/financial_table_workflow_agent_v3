@@ -45,7 +45,7 @@ def validate_arguments(schema: dict[str, Any], arguments: dict[str, Any]) -> Non
     - ``enum``: list（值必须在枚举内）
     - ``items``: schema（array 元素子 schema）
 
-    限制（在 docs/stage9 中说明）：
+    限制（在 docs/LLM_AGENT.md 中说明）：
     - 不支持 ``additionalProperties``、``pattern``、``minimum/maximum``、
       ``minItems/maxItems``、``oneOf/allOf/anyOf`` 等高级关键字。
     - ``integer`` 接受 int；``number`` 接受 int/float（不含 bool）。
