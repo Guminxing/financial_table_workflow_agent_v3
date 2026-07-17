@@ -19,6 +19,7 @@ python -B src/chat_agent.py --output_base outputs_agent --max_tool_turns 20 `
 |---|---|
 | **LLM Agent 怎么跑、怎么审批、怎么排查**（重点） | **[docs/LLM_AGENT.md](docs/LLM_AGENT.md)** |
 | 确定性七阶段 Pipeline 在做什么、为什么 | [docs/PIPELINE.md](docs/PIPELINE.md) |
+| 真实行情与真实 LLM 端到端测试记录 | [docs/test_records/](docs/test_records/) |
 | 目录结构、模块职责、调用链 | [CODE_STRUCTURE.md](CODE_STRUCTURE.md) |
 | 分阶段开发过程记录（Stage 2–12） | [docs/archive/](docs/archive/) |
 

@@ -84,6 +84,15 @@ financial_table_workflow_agent_v3/
 ├── docs/
 │   ├── LLM_AGENT.md                    # LLM Agent 主文档（架构/工具/审批/运行/排查/验收）
 │   ├── PIPELINE.md                     # 确定性七阶段 Pipeline
+│   ├── test_records/                   # 真实环境端到端测试记录
+│   │   ├── README.md                    # 测试记录索引
+│   │   ├── 2026-07-17_mode_b_real_market_e2e.md
+│   │   ├── 2026-07-17_mode_b_single_ticker_e2e.md
+│   │   ├── 2026-07-17_mode_b_multi_ticker_cross_section_e2e.md
+│   │   ├── 2026-07-17_mode_b_long_range_e2e.md
+│   │   ├── 2026-07-17_mode_b_fundamentals_snapshot_boundary_e2e.md
+│   │   ├── 2026-07-17_mode_b_partial_ticker_failure_tolerance_e2e.md
+│   │   └── 2026-07-17_mode_b_no_usable_data_safe_stop_e2e.md
 │   └── archive/                        # 分阶段开发过程记录（Stage 2–12，已被主文档取代）
 ├── prompts/
 │   ├── workflow_planner_prompt.md      # LLM Planner Prompt 模板（供后续接入）
@@ -162,7 +171,8 @@ financial_table_workflow_agent_v3/
 
 - `prompts/`：`financial_agent_system.md`（自然语言 Agent system prompt，Stage 12 双模式）、`workflow_planner_prompt.md`（LLM Planner 模板，供后续接入）。
 - `tests/`：见 [§6](#6-测试结构)。
-- `docs/`：`LLM_AGENT.md`（LLM Agent 主文档）、`PIPELINE.md`（确定性七阶段）、`archive/`（Stage 2–12 开发过程记录，已被前两者取代）。
+- `docs/`：`LLM_AGENT.md`（LLM Agent 主文档）、`PIPELINE.md`（确定性七阶段）、
+  `test_records/`（真实环境端到端验收记录）、`archive/`（Stage 2–12 开发过程记录）。
 - `test_data/real_market_sample/`：小型真实 A 股 fixture（ticker 600519，2024-01-01..2024-01-10），仅用于测试与最小演示，不是代表性市场样本，不是投资数据。
 
 ---

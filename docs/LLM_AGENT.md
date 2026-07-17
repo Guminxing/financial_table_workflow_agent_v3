@@ -391,6 +391,9 @@ python -B -m unittest discover -s tests -v
 **实际结果：201 项全部通过**（`Ran 201 tests ... OK`）。测试**不访问网络、不依赖真实 LLM、
 不修改被提交的 fixture**（故障注入到临时副本；抓取测试 mock `real_data_adapter.fetch_real_data`）。
 
+真实网络 + 真实 LLM 的端到端验收见 [测试记录索引](test_records/)。这些记录与上述
+201 项离线自动测试分开统计。
+
 Agent 相关的关键测试文件：
 
 | 文件 | 覆盖 |
