@@ -208,15 +208,21 @@ Final report: outputs_chinese_report_smoke/final_report/final_workflow_report.md
 ```powershell
 # 只抓取
 python -B src/run_fetch_real_data.py `
-  --tickers 600519,000001 --start_date 2024-01-01 --end_date 2024-06-30 `
+  --tickers "600519,000001" --start_date 2024-01-01 --end_date 2024-06-30 `
   --output_dir data/real_market --no_snapshot_fundamentals
 
 # 抓取后直接跑完整 Pipeline
 python -B src/run_fetch_real_data.py `
-  --tickers 600519,000001 --start_date 2024-01-01 --end_date 2024-06-30 `
+  --tickers "600519,000001" --start_date 2024-01-01 --end_date 2024-06-30 `
   --output_dir data/real_market --no_snapshot_fundamentals `
   --run_pipeline --output_root outputs_real
 ```
+
+> **PowerShell 下 `--tickers` 的多股票列表必须加引号。** 不加引号时 PowerShell 会把
+> `600519,000001` 当成**数组字面量**求值，`000001` 作为数字变成 `1`，前导零丢失，
+> 抓取会报 `invalid A-share ticker: '1'`。A 股代码前导零很常见（`000001` 平安银行、
+> `002594` 比亚迪），这个坑只在多股票时出现——单只 `--tickers 600519` 无逗号，不受影响。
+> Bash 下没有这个问题，但加引号在两边都对。
 
 数据源细节（东财/新浪/腾讯、fallback、缓存隔离、许可证归属）见 [LLM_AGENT.md §9](LLM_AGENT.md#9-数据源模式-b)。
 
