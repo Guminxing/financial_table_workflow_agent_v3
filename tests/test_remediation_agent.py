@@ -28,6 +28,7 @@ v3 改动：
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,12 @@ SRC = HERE.parent / "src"
 for p in (str(SRC), str(HERE.parent)):
     if p not in sys.path:
         sys.path.insert(0, p)
+
+# 子进程调用统一强制 UTF-8：父进程以 encoding="utf-8" 解码，同时通过 env 让子进程也用
+# UTF-8 输出。否则在 Windows 上父按 locale(GBK) 解、子按 PYTHONIOENCODING 编，编码不一致
+# 会抛 UnicodeDecodeError（当外部设了 PYTHONIOENCODING=utf-8 而系统 locale 仍为 GBK 时，
+# 子进程输出 UTF-8 字节、父进程却用 GBK 解码而崩，capture 的 stdout 变成 None）。
+_SUBPROC_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
 
 import pandas as pd  # noqa: E402
 
@@ -637,7 +644,7 @@ class TestExitCodes(unittest.TestCase):
             "--input_dir", str(self.input_dir),
             "--output_root", str(self.output_root),
         ] + list(extra_args)
-        r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(HERE.parent))
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=_SUBPROC_ENV, cwd=str(HERE.parent))
         return r.returncode
 
     def test_exit_0_when_passed(self):
@@ -721,7 +728,7 @@ class TestShellStateRestore(unittest.TestCase):
              "--input_dir", str(self.input_dir),
              "--output_root", str(self.output_root),
              "--max_row_loss_ratio", "0.5"],
-            capture_output=True, text=True, cwd=str(HERE.parent),
+            capture_output=True, text=True, encoding="utf-8", env=_SUBPROC_ENV, cwd=str(HERE.parent),
         )
         self.assertEqual(r.returncode, 0)
         # 新建 runner 指向已有 outputs，不跑 pipeline，直接 get_status
@@ -747,7 +754,7 @@ class TestShellStateRestore(unittest.TestCase):
              "--input_dir", str(self.input_dir),
              "--output_root", str(self.output_root),
              "--max_row_loss_ratio", "0.5"],
-            capture_output=True, text=True, cwd=str(HERE.parent),
+            capture_output=True, text=True, encoding="utf-8", env=_SUBPROC_ENV, cwd=str(HERE.parent),
         )
         # 用 agent_shell --demo_commands 指向已有 outputs
         r = subprocess.run(
@@ -755,7 +762,7 @@ class TestShellStateRestore(unittest.TestCase):
              "--input_dir", str(self.input_dir),
              "--output_root", str(self.output_root),
              "--demo_commands"],
-            capture_output=True, text=True, cwd=str(HERE.parent),
+            capture_output=True, text=True, encoding="utf-8", env=_SUBPROC_ENV, cwd=str(HERE.parent),
         )
         out = r.stdout
         # status 与 show summary 都应显示 repair_rounds=1, termination=validation_passed
