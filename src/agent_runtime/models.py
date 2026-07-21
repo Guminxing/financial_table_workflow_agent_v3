@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Dict, Protocol, runtime_checkable
 
 if TYPE_CHECKING:  # 仅用于类型提示，避免运行时循环 import
     from .policy import PendingApproval
@@ -189,7 +189,9 @@ class ToolResult:
 
 
 # 工具 handler 签名：(arguments: dict, context: AgentContext) -> ToolResult
-ToolHandler = Callable[[dict[str, Any], Any], ToolResult]
+# 注意：这是运行时求值的类型别名（非注解），from __future__ import annotations 不作用于此，
+# 故用 typing.Dict 而非内置 dict[...]，以兼容 Python 3.8（PEP 585 内置泛型下标是 3.9+）。
+ToolHandler = Callable[[Dict[str, Any], Any], ToolResult]
 
 
 @runtime_checkable

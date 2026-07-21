@@ -68,7 +68,7 @@ profile → plan → prepare panel → validate → safe remediation（仅当 va
 
 ## 快速开始
 
-**依赖**：Python 3.10+，只需 `pandas>=1.5.0` 和 `requests>=2.32.0`。
+**依赖**：Python 3.8+，只需 `pandas>=1.5.0` 和 `requests>=2.32.0`。
 
 ```powershell
 pip install -r requirements.txt

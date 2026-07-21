@@ -50,7 +50,7 @@ flowchart TD
 
 ### 2.1 前提
 
-- Python 3.10+
+- Python 3.8+（3.9 及以上会装 pandas 2.3.x，3.8 会装 pandas 2.0.x；3.8 / 3.9 / 3.13 均已跑通全部 201 项测试）
 - `pip install -r requirements.txt`（只有 `pandas>=1.5.0` 和 `requests>=2.32.0`）
 
 ### 2.2 配置 LLM（三个环境变量）
@@ -423,7 +423,7 @@ Agent 相关的关键测试文件：
 | `manual_review_required`（退出码 2） | 删行 > 5%、`no_progress`、标签泄漏、空 panel | **这是安全停止，不是 bug**。看 `repaired/repair_history.json` 与 `validation_repaired/validation_report.json`。可放宽 `--max_row_loss_ratio`（如 0.5）后重跑，但需理解其含义 |
 | 审批拒绝后停止 | 对 guarded 工具输入了 `n` | 预期行为。模型收到 `TOOL_REJECTED_BY_USER`，应另选方案或给最终总结 |
 | 中文报告乱码 | 用了非 UTF-8 工具查看 | `Get-Content -Encoding utf8` 或用 VS Code |
-| 测试失败 | 环境问题或代码被改 | 确认依赖装好、Python 3.10+、fixture 未改（`git diff --stat test_data/` 应为空） |
+| 测试失败 | 环境问题或代码被改 | 确认依赖装好、Python 3.8+、fixture 未改（`git diff --stat test_data/` 应为空） |
 
 ---
 
@@ -448,7 +448,7 @@ Agent 相关的关键测试文件：
 按顺序执行，全部通过即验收完成。
 
 **环境**
-- [ ] `python --version` ≥ 3.10
+- [ ] `python --version` ≥ 3.8
 - [ ] `pip install -r requirements.txt`
 - [ ] 三个 `FTA_LLM_*` 已设置（§2.2 验证命令）
 - [ ] （模式 B）§9 的最小抓取成功

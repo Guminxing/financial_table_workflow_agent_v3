@@ -1,2 +1,4 @@
+# 最低 Python 3.8。3.8 解析到 pandas 2.0.x + numpy 1.24.x；3.9 及以上解析到
+# pandas 2.3.x + numpy 2.0.x。两种组合均已跑通全部 201 项测试。
 pandas>=1.5.0
 requests>=2.32.0
